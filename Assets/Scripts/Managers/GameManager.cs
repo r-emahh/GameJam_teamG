@@ -1,5 +1,4 @@
 using UnityEngine;
-using UnityEngine.InputSystem;
 
 // ゲームの状態を管理するクラス
 public enum GameState
@@ -9,43 +8,48 @@ public enum GameState
 	Pause,
 	GameOver
 }
+
 public class GameManager : MonoBehaviour
 {
+	// シングルトンインスタンス
+	public static GameManager _gameManager { get; private set; }
+
+	// ゲームの状態を管理する変数
+	// 初期値はタイトル画面にしておく
+	public static GameState currentState { get; private set; } = GameState.Title;
 
 	[RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
-	public static void Initialize()
+	private static void Bootstrap()
 	{
-		if (_gameManager == null)
+		if (_gameManager != null)
 		{
-			// シーンにGameManagerが存在しない場合は、新しく作成する
-			GameObject gameManagerObject = new GameObject("GameManager");
-			_gameManager = gameManagerObject.AddComponent<GameManager>();
-			DontDestroyOnLoad(gameManagerObject);
+			return;
 		}
+
+		// 生成後の初期化と永続化はAwakeで一元管理する
+		new GameObject(nameof(GameManager)).AddComponent<GameManager>();
 	}
-	// シングルトンの実装
-	// ゲッターとセッターを使って、外部からアクセスできるようにする
-	// しかし、セッターはprivateにして、外部から変更できないようにする
-	public static GameManager _gameManager { get; private set; }
-	private GameState gameState;
 
-
-    void Awake()
+	private void Awake()
 	{
-		
+		// すでに存在する場合は重複を破棄する
+		if (_gameManager != null && _gameManager != this)
+		{
+			Destroy(gameObject);
+			return;
+		}
+
+		_gameManager = this;
+		DontDestroyOnLoad(gameObject);
 	}
 
-	// Start is called before the first frame update
-	void Start()
+	public void ChangeState(GameState nextState)
 	{
-		
+		if (currentState == nextState)
+		{
+			return;
+		}
+
+		currentState = nextState;
 	}
-
-    // Update is called once per frame
-    void Update()
-	{
-		
-	}
-
-
 }

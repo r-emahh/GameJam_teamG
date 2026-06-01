@@ -2,8 +2,24 @@ using UnityEngine;
 
 public class AudioManager : MonoBehaviour
 {
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
-    void Start()
+    public static AudioManager _audioManager { get; private set; }
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+    private static void Initialize()
+    {
+        if (_audioManager == null)
+		{
+			_audioManager = new GameObject("_audioManager").AddComponent<AudioManager>();
+			DontDestroyOnLoad(_audioManager.gameObject);
+		}
+		else
+		{
+			Destroy(_audioManager.gameObject);
+			_audioManager = new GameObject("_audioManager").AddComponent<AudioManager>();
+            		
+        }
+    }
+        void Start()
     {
         
     }
