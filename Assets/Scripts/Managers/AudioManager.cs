@@ -9,13 +9,13 @@ public class AudioManager : MonoBehaviour
     {
         if (_audioManager == null)
 		{
-			_audioManager = new GameObject("_audioManager").AddComponent<AudioManager>();
+			_audioManager = new GameObject("AudioManager").AddComponent<AudioManager>();
 			DontDestroyOnLoad(_audioManager.gameObject);
 		}
 		else
 		{
 			Destroy(_audioManager.gameObject);
-			_audioManager = new GameObject("_audioManager").AddComponent<AudioManager>();
+			_audioManager = new GameObject("AudioManager").AddComponent<AudioManager>();
             		
         }
     }
