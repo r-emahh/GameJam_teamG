@@ -14,7 +14,16 @@ public class PlayerController : MonoBehaviour
 
 	// ジャンプ力
 	[SerializeField]
-	public float JumpPower;
+	public float jumpPower;
+	[SerializeField]
+	public float walljumpPower;
+
+	[SerializeField]
+	private float disableInputTimer;
+
+	// 慣性
+	[SerializeField]
+	private float acceleration = 10f;
 
 	// 接地判定
 	[SerializeField]
@@ -31,9 +40,6 @@ public class PlayerController : MonoBehaviour
 	// 床のレイヤーを指定する変数
 	[SerializeField]
 	private LayerMask groundLayer;
-
-	[SerializeField]
-	private LayerMask WallLayer;
 
 	// Rigidbody2Dを保持する変数
 	[SerializeField]
@@ -59,20 +65,43 @@ public class PlayerController : MonoBehaviour
 		isGrounded = Physics2D.OverlapCircle(new Vector2(boxCollider2D.bounds.center.x, boxCollider2D.bounds.min.y), 0.1f, groundLayer);
 		// 右壁接触判定の更新
 		isTouchingWallRight = Physics2D.OverlapBox(
-			new Vector2(boxCollider2D.bounds.max.x, boxCollider2D.bounds.center.y),           // 1. 中心座標（キャラの中心）
-			new Vector2(0.3f, boxCollider2D.bounds.size.y - 0.2f),  // 2. Boxのサイズ
-			0f,                                    // 3. 角度（回転させないので0f）
-			WallLayer                            // 4. 判定するレイヤー
+			// 中心座標（キャラの中心）
+			new Vector2(boxCollider2D.bounds.max.x, boxCollider2D.bounds.center.y),
+			// Boxのサイズ
+			new Vector2(0.3f, boxCollider2D.bounds.size.y - 0.2f),
+			// 角度（回転させないので0f）
+			0f,
+			// 判定するレイヤー
+			groundLayer
 		);
 		// 左壁接触判定の更新
 		isTouchingWallLeft = Physics2D.OverlapBox(
-			new Vector2(boxCollider2D.bounds.min.x, boxCollider2D.bounds.center.y),  // 1. 中心座標（キャラの中心）
-			new Vector2(0.3f, boxCollider2D.bounds.size.y - 0.2f),  // 2. Boxのサイズ
-			0f,                                    // 3. 角度（回転させないので0f）
-			WallLayer                            // 4. 判定するレイヤー
+			// 中心座標（キャラの中心）
+			new Vector2(boxCollider2D.bounds.min.x, boxCollider2D.bounds.center.y),
+			// Boxのサイズ
+			new Vector2(0.3f, boxCollider2D.bounds.size.y - 0.2f),
+			// 角度（回転させないので0f）
+			0f,
+			// 判定するレイヤー
+			groundLayer
 		);
 
-		rb2D.linearVelocityX = moveInput.x * MOVESPEED_X;
+		if (disableInputTimer > 0)
+		{
+			// 時間を減らす
+			disableInputTimer -= Time.fixedDeltaTime;
+			// 目標とする速度を計算
+			float targetSpeedX = moveInput.x * MOVESPEED_X;
+			// 現在の速度から目標速度へ、accelerationのペースで徐々に変化させる
+			rb2D.linearVelocityX = Mathf.MoveTowards(rb2D.linearVelocityX, targetSpeedX, acceleration * Time.fixedDeltaTime);
+		}
+		else
+		{
+			// 目標とする速度を計算
+			float targetSpeedX = moveInput.x * MOVESPEED_X;
+			// 現在の速度から目標速度へ、accelerationのペースで徐々に変化させる
+			rb2D.linearVelocityX = Mathf.MoveTowards(rb2D.linearVelocityX, targetSpeedX, acceleration * Time.fixedDeltaTime);
+		}
 	}
 
 	void OnMove(InputValue inputValue)
@@ -83,19 +112,23 @@ public class PlayerController : MonoBehaviour
 	void OnJump(InputValue inputValue)
 	{
 		// 接地していたらジャンプ可能
-		if (inputValue.isPressed != false && isGrounded != false)
+		if (inputValue.isPressed != false && isGrounded)
 		{
-			rb2D.linearVelocityY = JumpPower;
+			rb2D.linearVelocityY = jumpPower;
 		}
 
-		else if (isTouchingWallRight)
+		// 壁ジャンプ右
+		else if (isTouchingWallRight && !isGrounded)
 		{
-			rb2D.linearVelocityY = JumpPower;
+			rb2D.linearVelocity = new Vector2(-walljumpPower, walljumpPower);
+			disableInputTimer += 0.2f;
 		}
 
-		else if (isTouchingWallLeft)
+		// 壁ジャンプ左
+		else if (isTouchingWallLeft && !isGrounded)
 		{
-			rb2D.linearVelocityY = JumpPower;
+			rb2D.linearVelocity = new Vector2(walljumpPower, walljumpPower);
+			disableInputTimer += 0.2f;
 		}
 	}
 }

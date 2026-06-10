@@ -388,16 +388,16 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   MOVESPEED_X: 15
   moveInput: {x: 0, y: 0}
-  JumpPower: 15
+  jumpPower: 10
+  walljumpPower: 20
+  disableInputTimer: 0
+  acceleration: 70
   isGrounded: 0
   isTouchingWallRight: 0
   isTouchingWallLeft: 0
   groundLayer:
     serializedVersion: 2
     m_Bits: 64
-  WallLayer:
-    serializedVersion: 2
-    m_Bits: 256
   rb2D: {fileID: 654243510}
   boxCollider2D: {fileID: 654243515}
 --- !u!114 &654243514
@@ -801,7 +801,7 @@ GameObject:
   - component: {fileID: 1645070637}
   - component: {fileID: 1645070636}
   - component: {fileID: 1645070638}
-  m_Layer: 8
+  m_Layer: 6
   m_Name: Wall
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -888,7 +888,7 @@ BoxCollider2D:
   m_Enabled: 1
   serializedVersion: 3
   m_Density: 1
-  m_Material: {fileID: 0}
+  m_Material: {fileID: 6200000, guid: 3aa7a19b3c4564c4fbed6c634496af72, type: 2}
   m_IncludeLayers:
     serializedVersion: 2
     m_Bits: 0
@@ -935,7 +935,7 @@ GameObject:
   - component: {fileID: 1854251714}
   - component: {fileID: 1854251713}
   - component: {fileID: 1854251715}
-  m_Layer: 8
+  m_Layer: 6
   m_Name: Wall
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -1022,7 +1022,7 @@ BoxCollider2D:
   m_Enabled: 1
   serializedVersion: 3
   m_Density: 1
-  m_Material: {fileID: 0}
+  m_Material: {fileID: 6200000, guid: 3aa7a19b3c4564c4fbed6c634496af72, type: 2}
   m_IncludeLayers:
     serializedVersion: 2
     m_Bits: 0
