@@ -1,32 +1,31 @@
-using System;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
 public class SceneChanger : MonoBehaviour
 {
-    public void ChangeScene(string sceneName)
-    {
-        SceneManager.LoadScene(sceneName);
-    }
+	public void ChangeScene(string sceneName)
+	{
+		SceneManager.LoadScene(sceneName);
+	}
 
-    public void GameScene()
-    {
-        SceneManager.LoadScene("Game");
-    }
+	public void GameScene()
+	{
+		GameManager.Instance?.ChangeState(GameState.Game);
+		SceneManager.LoadScene("Rema");
+	}
 
-    public void TitleScene()
-    {
-        SceneManager.LoadScene("Title");
-    }
+	public void TitleScene()
+	{
+		GameManager.Instance?.ChangeState(GameState.Title);
+		SceneManager.LoadScene("Title");
+	}
 
-    public void QuitGame()
-    {
-        #if UNITY_EDITOR
-        // Unityエディタの再生モードを停止する
-        UnityEditor.EditorApplication.isPlaying = false;
+	public void QuitGame()
+	{
+#if UNITY_EDITOR
+		UnityEditor.EditorApplication.isPlaying = false;
 #else
-        // 実際にビルドされたゲームを終了する
-        Application.Quit();
+		Application.Quit();
 #endif
-    }
+	}
 }
