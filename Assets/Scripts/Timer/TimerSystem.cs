@@ -1,3 +1,4 @@
+using TMPro;
 using UnityEngine;
 
 public class TimerSystem : MonoBehaviour
@@ -9,6 +10,8 @@ public class TimerSystem : MonoBehaviour
 
     //for debugging
     private float _timeCount;
+
+    public TextMeshProUGUI timerText;
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
@@ -28,6 +31,8 @@ public class TimerSystem : MonoBehaviour
         if(timerSec > 0)
         {
             timerSec -= Time.deltaTime;
+
+            timerText.text = Mathf.CeilToInt(timerSec).ToString();
 
             //for debugging
             _timeCount += Time.deltaTime;
