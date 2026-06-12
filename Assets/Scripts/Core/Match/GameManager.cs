@@ -51,6 +51,8 @@ public sealed class GameManager : MonoBehaviour
 	public event Action<MatchSide> OnMatchSideChanged;
 	// ラウンド変更を購読側へ通知する。
 	public event Action<int> OnRoundChanged;
+	// 次ラウンドへの切り替えを購読側へ通知する。
+	public event Action<int> OnRoundAdvanced;
 	// タイマー更新を購読側へ通知する。
 	public event Action<float, float> OnPhaseTimerChanged;
 	// 結果変更を購読側へ通知する。
@@ -174,6 +176,7 @@ public sealed class GameManager : MonoBehaviour
 		session.PhaseChanged += HandlePhaseChanged;
 		session.SideChanged += HandleSideChanged;
 		session.RoundChanged += HandleRoundChanged;
+		session.RoundAdvanced += HandleRoundAdvanced;
 		session.TimerChanged += HandleTimerChanged;
 		session.ResultChanged += HandleResultChanged;
 		session.LaunchBudgetChanged += HandleLaunchBudgetChanged;
@@ -186,6 +189,7 @@ public sealed class GameManager : MonoBehaviour
 		session.PhaseChanged -= HandlePhaseChanged;
 		session.SideChanged -= HandleSideChanged;
 		session.RoundChanged -= HandleRoundChanged;
+		session.RoundAdvanced -= HandleRoundAdvanced;
 		session.TimerChanged -= HandleTimerChanged;
 		session.ResultChanged -= HandleResultChanged;
 		session.LaunchBudgetChanged -= HandleLaunchBudgetChanged;
@@ -198,6 +202,8 @@ public sealed class GameManager : MonoBehaviour
 	private void HandleSideChanged(MatchSide value) => OnMatchSideChanged?.Invoke(value);
 	// 各イベントをそのまま公開イベントへ流す。
 	private void HandleRoundChanged(int value) => OnRoundChanged?.Invoke(value);
+	// 各イベントをそのまま公開イベントへ流す。
+	private void HandleRoundAdvanced(int value) => OnRoundAdvanced?.Invoke(value);
 	// 各イベントをそのまま公開イベントへ流す。
 	private void HandleTimerChanged(float remaining, float total) => OnPhaseTimerChanged?.Invoke(remaining, total);
 	// 各イベントをそのまま公開イベントへ流す。

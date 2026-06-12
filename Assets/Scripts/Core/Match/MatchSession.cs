@@ -36,6 +36,8 @@ public sealed class MatchSession
 	public event Action<MatchSide> SideChanged;
 	// ラウンド変更を外部へ通知する。
 	public event Action<int> RoundChanged;
+	// 次ラウンドへ移る直前に外部へ通知する。
+	public event Action<int> RoundAdvanced;
 	// タイマー変更を外部へ通知する。
 	public event Action<float, float> TimerChanged;
 	// 結果変更を外部へ通知する。
@@ -202,6 +204,7 @@ public sealed class MatchSession
 		RoundChanged?.Invoke(Round);
 		ResultChanged?.Invoke(Result);
 		SetSide(MatchSide.GoalRunner, true);
+		RoundAdvanced?.Invoke(Round);
 		SetPhase(MatchPhase.Draw);
 	}
 

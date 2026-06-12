@@ -50,6 +50,7 @@ public sealed class CannonProjectile : MonoBehaviour
 	public static CannonProjectile CreateRuntime(Vector3 position, Quaternion rotation, bool stunProjectile)
 	{
 		GameObject projectileObject = new GameObject(stunProjectile ? "StunProjectile" : "DrawingProjectile");
+		projectileObject.AddComponent<RuntimeRoundObject>();
 		projectileObject.transform.SetPositionAndRotation(position, rotation);
 
 		SpriteRenderer renderer = projectileObject.AddComponent<SpriteRenderer>();

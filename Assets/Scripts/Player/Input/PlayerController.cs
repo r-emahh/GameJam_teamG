@@ -23,12 +23,16 @@ public sealed class PlayerController : MonoBehaviour
 	private PlayerCannon cannon;
 	// 描画入力とスタンプ生成を管理する。
 	private PlayerDrawing drawing;
-	// Race 中に非表示化するための描画コンポーネント群を保持する。
+	// 頭上ラベルの表示を管理する。
+	private PlayerNameplate nameplate;
+	// プレイヤー本体の表示切り替えに使う描画コンポーネント群を保持する。
 	private Renderer[] renderers;
-	// Race 中に無効化するための当たり判定群を保持する。
+	// Race 中のブロッカー制限に使う当たり判定群を保持する。
 	private Collider2D[] colliders;
-	// 現在ブロッカーが Race 中に隠れているかを保持する。
-	private bool isRaceBlockerHidden;
+	// 現在ブロッカー本体の見た目を隠しているかを保持する。
+	private bool isBlockerAvatarHidden;
+	// 現在ブロッカーが Race 中の制限対象かを保持する。
+	private bool isRaceBlockerSuppressed;
 	// 現在の移動入力を保持する。
 	private Vector2 moveInput;
 
@@ -53,32 +57,39 @@ public sealed class PlayerController : MonoBehaviour
 		stun = GetComponent<PlayerStun>();
 		cannon = GetComponent<PlayerCannon>();
 		drawing = GetComponent<PlayerDrawing>();
+		nameplate = GetComponent<PlayerNameplate>();
+		if (nameplate == null)
+		{
+			nameplate = gameObject.AddComponent<PlayerNameplate>();
+		}
+
 		renderers = GetComponentsInChildren<Renderer>(true);
 		colliders = GetComponentsInChildren<Collider2D>(true);
 		drawing.ConfigureControlledSide(identity.ControlledSide);
-		RefreshRaceBlockerState();
+		RefreshBlockerPresentationState();
 		RegisterWithInputManager();
 	}
 
 	// 起動直後にも再登録を試みる。
 	private void Start()
 	{
-		RefreshRaceBlockerState();
+		RefreshBlockerPresentationState();
 		RegisterWithInputManager();
+		nameplate?.RefreshDisplay();
 	}
 
-	// 毎フレーム、Race 中のブロッカー表示と操作を同期する。
+	// 毎フレーム、ブロッカー本体の見た目と制限状態を同期する。
 	private void Update()
 	{
-		RefreshRaceBlockerState();
+		RefreshBlockerPresentationState();
 	}
 
 	// 固定更新で移動系の処理をまとめて進める。
 	private void FixedUpdate()
 	{
 		drawing.TickFixed();
-		RefreshRaceBlockerState();
-		if (isRaceBlockerHidden)
+		RefreshBlockerPresentationState();
+		if (isRaceBlockerSuppressed)
 		{
 			motor.SetMoveInput(Vector2.zero);
 			dash.SetPreferredDirection(Vector2.zero);
@@ -123,7 +134,7 @@ public sealed class PlayerController : MonoBehaviour
 		Vector2 value = inputValue.Get<Vector2>();
 		moveInput = value;
 		drawing.SetMoveInput(value);
-		if (IsRaceBlockerHidden())
+		if (IsRaceBlockerSuppressed())
 		{
 			return;
 		}
@@ -138,7 +149,7 @@ public sealed class PlayerController : MonoBehaviour
 	// ジャンプ入力を移動コンポーネントへ渡す。
 	public void OnJump(InputValue inputValue)
 	{
-		if (inputValue.isPressed && !IsDrawPhase() && !IsRaceBlockerHidden())
+		if (inputValue.isPressed && !IsDrawPhase() && !IsRaceBlockerSuppressed())
 		{
 			motor.TryJump(contactSensor);
 		}
@@ -147,7 +158,7 @@ public sealed class PlayerController : MonoBehaviour
 	// ダッシュ入力を処理する。
 	public void OnSprint(InputValue inputValue)
 	{
-		if (inputValue.isPressed && !IsDrawPhase() && !IsRaceBlockerHidden())
+		if (inputValue.isPressed && !IsDrawPhase() && !IsRaceBlockerSuppressed())
 		{
 			dash.TryDash(moveInput);
 		}
@@ -216,6 +227,7 @@ public sealed class PlayerController : MonoBehaviour
 	{
 		identity.AssignSide(side);
 		drawing.ConfigureControlledSide(side);
+		RefreshBlockerPresentationState();
 	}
 	// ローカル入力スキームを設定する。
 	public void ConfigureLocalInput(MatchSide side, bool useGamepad) => identity.ConfigureLocalInput(side, useGamepad);
@@ -225,6 +237,20 @@ public sealed class PlayerController : MonoBehaviour
 	public void ResetDashAvailability() => dash.ResetAvailability();
 	// スタンを適用する。
 	public void ApplyStun(float duration) => stun.Apply(duration);
+	// ラウンド切り替え時の状態をまとめて初期化する。
+	public void ResetForNextRound(Vector3 spawnPosition)
+	{
+		transform.position = spawnPosition;
+		moveInput = Vector2.zero;
+		drawing.SetMoveInput(Vector2.zero);
+		motor.SetMoveInput(Vector2.zero);
+		dash.SetPreferredDirection(Vector2.zero);
+		motor.ResetForNextRound();
+		dash.ResetAvailability();
+		cannon.ResetForNextRound();
+		drawing.ResetForNextRound();
+		RefreshBlockerPresentationState();
+	}
 
 	// 描画フェーズかどうかを返す。
 	private static bool IsDrawPhase()
@@ -232,31 +258,39 @@ public sealed class PlayerController : MonoBehaviour
 		return GameManager.Instance != null && GameManager.currentState == GameState.Game && GameManager.Instance.CurrentPhase == MatchPhase.Draw;
 	}
 
-	// Race 中にブロッカーが非表示扱いかを返す。
-	private bool IsRaceBlockerHidden()
+	// Race 中にブロッカーが移動停止と当たり判定オフ対象かを返す。
+	private bool IsRaceBlockerSuppressed()
 	{
-		return isRaceBlockerHidden;
+		return isRaceBlockerSuppressed;
 	}
 
-	// Race 中のブロッカーだけ表示と当たり判定を切り替える。
-	private void RefreshRaceBlockerState()
+	// ブロッカー本体の見た目と Race 中の制限状態を同期する。
+	private void RefreshBlockerPresentationState()
 	{
-		bool shouldHide = GameManager.Instance != null
+		bool shouldHideAvatar = identity != null
+			&& identity.ControlledSide == MatchSide.Blocker;
+		if (shouldHideAvatar != isBlockerAvatarHidden)
+		{
+			isBlockerAvatarHidden = shouldHideAvatar;
+			SetRenderersEnabled(!shouldHideAvatar);
+			nameplate?.SetVisible(!shouldHideAvatar);
+		}
+
+		bool shouldSuppressInRace = GameManager.Instance != null
 			&& GameManager.currentState == GameState.Game
 			&& GameManager.Instance.CurrentPhase == MatchPhase.Race
 			&& identity != null
 			&& identity.ControlledSide == MatchSide.Blocker;
 
-		if (shouldHide == isRaceBlockerHidden)
+		if (shouldSuppressInRace == isRaceBlockerSuppressed)
 		{
 			return;
 		}
 
-		isRaceBlockerHidden = shouldHide;
-		SetRenderersEnabled(!shouldHide);
-		SetCollidersEnabled(!shouldHide);
+		isRaceBlockerSuppressed = shouldSuppressInRace;
+		SetCollidersEnabled(!shouldSuppressInRace);
 
-		if (shouldHide)
+		if (shouldSuppressInRace)
 		{
 			moveInput = Vector2.zero;
 			motor.SetMoveInput(Vector2.zero);

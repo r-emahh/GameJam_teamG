@@ -2,7 +2,7 @@ using TMPro;
 using UnityEngine;
 
 [DisallowMultipleComponent]
-// 描画フェーズ中のカーソル移動とスタンプ生成を担当する。
+// 描画フェーズ中のカーソル移動と配置入力を担当する。
 public sealed class PlayerDrawing : MonoBehaviour
 {
 	// 利用する固定図形を管理する。
@@ -21,8 +21,6 @@ public sealed class PlayerDrawing : MonoBehaviour
 	[SerializeField]
 	private Vector2 cameraEdgePadding = new Vector2(0.7f, 0.7f);
 
-	// スタンプの表示倍率を保持する。
-	private const float StampScale = 0.5f;
 	// カーソル表示の倍率を保持する。
 	private const float CursorVisualScale = 0.5f;
 	// カーソル上に表示する残数ラベルの高さを保持する。
@@ -44,6 +42,9 @@ public sealed class PlayerDrawing : MonoBehaviour
 	private MatchSide controlledSide = MatchSide.GoalRunner;
 	// 表示用カメラを保持する。
 	private Camera targetCamera;
+	// 描画面を保持する。
+	private DrawingSurface drawingSurface;
+
 
 	// 現在選択中の図形を返す。
 	public DrawingStampShape CurrentShape => Shapes[currentShapeIndex];
@@ -53,6 +54,7 @@ public sealed class PlayerDrawing : MonoBehaviour
 	{
 		cursorPosition = transform.position;
 		targetCamera = Camera.main;
+		drawingSurface = FindFirstObjectByType<DrawingSurface>();
 		EnsureCursorVisual();
 		UpdateCursorVisual();
 		UpdateCursorBudgetLabel();
@@ -107,32 +109,33 @@ public sealed class PlayerDrawing : MonoBehaviour
 			return;
 		}
 
-		GameObject stamp = new GameObject($"{CurrentShape}Stamp");
-		stamp.transform.position = cursorPosition;
-		stamp.transform.localScale = new Vector3(StampScale, StampScale, 1f);
-
-		SpriteRenderer renderer = stamp.AddComponent<SpriteRenderer>();
-		renderer.sprite = RuntimeSpriteFactory.GetDrawingStampSprite(CurrentShape);
-		renderer.color = new Color(0.93f, 0.93f, 0.93f, 1f);
-		renderer.sortingOrder = 1;
-
-		switch (CurrentShape)
+		if (drawingSurface == null)
 		{
-			case DrawingStampShape.Circle:
-				stamp.AddComponent<CircleCollider2D>().radius = 0.5f;
-				break;
-			case DrawingStampShape.Triangle:
-				stamp.AddComponent<PolygonCollider2D>().points = new[]
-				{
-					new Vector2(0f, 0.5f),
-					new Vector2(-0.5f, -0.45f),
-					new Vector2(0.5f, -0.45f)
-				};
-				break;
-			default:
-				stamp.AddComponent<BoxCollider2D>().size = Vector2.one;
-				break;
+			drawingSurface = FindFirstObjectByType<DrawingSurface>();
 		}
+
+		if (drawingSurface == null)
+		{
+			return;
+		}
+
+		drawingSurface.CreateStamp(cursorPosition, CurrentShape);
+	}
+
+	// 次ラウンドに向けてカーソルと図形選択を初期化する。
+	public void ResetForNextRound()
+	{
+		moveInput = Vector2.zero;
+		currentShapeIndex = 0;
+		cursorPosition = transform.position;
+		UpdateCursorVisual();
+		UpdateCursorBudgetLabel();
+		if (cursorVisual != null)
+		{
+			cursorVisual.transform.position = cursorPosition;
+		}
+
+		SetCursorVisible(false);
 	}
 
 	// 描画フェーズ中だけカーソルを進める。
@@ -173,6 +176,7 @@ public sealed class PlayerDrawing : MonoBehaviour
 		}
 
 		cursorVisual = new GameObject("DrawingCursor");
+		cursorVisual.AddComponent<RuntimeRoundObject>();
 		cursorVisual.transform.SetParent(null, true);
 		cursorRenderer = cursorVisual.AddComponent<SpriteRenderer>();
 		cursorRenderer.color = new Color(0.15f, 0.95f, 1f, 0.7f);

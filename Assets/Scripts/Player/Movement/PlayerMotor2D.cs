@@ -110,6 +110,14 @@ public sealed class PlayerMotor2D : MonoBehaviour
 		body.linearVelocity = Vector2.zero;
 	}
 
+	// ラウンド切り替えに備えて入力ロックと速度を初期化する。
+	public void ResetForNextRound()
+	{
+		inputLockTimer = 0f;
+		SetMovementLocked(false);
+		Stop();
+	}
+
 	// 移動を完全にロックまたは解除する。
 	public void SetMovementLocked(bool locked)
 	{

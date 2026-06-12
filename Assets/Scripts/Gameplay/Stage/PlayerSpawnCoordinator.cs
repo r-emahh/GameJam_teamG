@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 [DisallowMultipleComponent]
 // 試合開始時にプレイヤーをスポーン地点へ配置する。
@@ -37,23 +38,74 @@ public sealed class PlayerSpawnCoordinator : MonoBehaviour
 			return;
 		}
 
-		PlacePlayer(players[0], goalRunnerSpawn, MatchSide.GoalRunner, false);
-		if (players.Count > 1)
+		PlayerController goalRunnerPlayer = null;
+		PlayerController blockerPlayer = null;
+		foreach (PlayerController player in players)
 		{
-			PlacePlayer(players[1], blockerSpawn, MatchSide.Blocker, true);
+			if (player == null)
+			{
+				continue;
+			}
+
+			if (player.ControlledSide == MatchSide.GoalRunner && goalRunnerPlayer == null)
+			{
+				goalRunnerPlayer = player;
+			}
+			else if (player.ControlledSide == MatchSide.Blocker && blockerPlayer == null)
+			{
+				blockerPlayer = player;
+			}
+		}
+
+		if (goalRunnerPlayer == null && players.Count > 0)
+		{
+			goalRunnerPlayer = players[0];
+		}
+
+		if (blockerPlayer == null && players.Count > 1)
+		{
+			blockerPlayer = players[1] == goalRunnerPlayer ? players[0] : players[1];
+		}
+
+		PlacePlayer(goalRunnerPlayer, goalRunnerSpawn, UsesGamepad(goalRunnerPlayer));
+		if (blockerPlayer != null && blockerPlayer != goalRunnerPlayer)
+		{
+			PlacePlayer(blockerPlayer, blockerSpawn, UsesGamepad(blockerPlayer));
 		}
 
 		InputManager.Instance.ResetDashAvailabilityForAllPlayers();
 	}
 
 	// 1人分の配置と入力設定をまとめる。
-	private static void PlacePlayer(PlayerController player, Transform spawn, MatchSide side, bool useGamepad)
+	private static void PlacePlayer(PlayerController player, Transform spawn, bool useGamepad)
 	{
+		if (player == null)
+		{
+			return;
+		}
+
 		if (spawn != null)
 		{
 			player.transform.position = spawn.position;
 		}
 
-		player.ConfigureLocalInput(side, useGamepad);
+		player.ConfigureLocalInput(player.ControlledSide, useGamepad);
+	}
+
+	// 既存の入力スキームを優先し、未設定なら登録順で決める。
+	private static bool UsesGamepad(PlayerController player)
+	{
+		if (player == null)
+		{
+			return false;
+		}
+
+		PlayerInput input = player.GetComponent<PlayerInput>();
+		if (input != null && !string.IsNullOrEmpty(input.currentControlScheme))
+		{
+			return input.currentControlScheme == "Gamepad";
+		}
+
+		return InputManager.Instance != null && InputManager.Instance.GetPlayerIndex(player) > 0;
 	}
 }
