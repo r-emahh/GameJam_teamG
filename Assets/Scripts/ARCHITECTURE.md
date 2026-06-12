@@ -16,7 +16,7 @@ The runtime code is organized by responsibility instead of by scene.
 - `Player/Abilities/PlayerDash`: Dash state and physics override.
 - `Player/Abilities/PlayerStun`: Stun reaction.
 - `Player/Abilities/PlayerCannon`: Cannon selection and projectile launching.
-- `Player/Abilities/PlayerDrawing`: Drawing cursor and stamp timing.
+- `Player/Abilities/PlayerDrawing`: Drawing cursor, shape selection, and placement input.
 
 Add or remove player abilities as components. Avoid adding gameplay logic back into `PlayerController`.
 

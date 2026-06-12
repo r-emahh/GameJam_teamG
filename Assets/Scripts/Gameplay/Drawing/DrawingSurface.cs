@@ -10,11 +10,15 @@ public sealed class DrawingSurface : MonoBehaviour
 
 	// スタンプの大きさを保持する。
 	[SerializeField]
-	private Vector2 stampSize = new Vector2(0.7f, 0.7f);
+	private Vector2 stampSize = new Vector2(0.5f, 0.5f);
 
 	// スタンプの色を保持する。
 	[SerializeField]
 	private Color stampColor = new Color(0.93f, 0.93f, 0.93f, 1f);
+
+	// スタンプを配置するレイヤー名。
+	[SerializeField]
+	private string stampLayerName = "Ground";
 
 	// ワールド座標上の描画可能範囲を返す。
 	public Rect WorldBounds => new Rect((Vector2)transform.position - size * 0.5f, size);
@@ -39,9 +43,16 @@ public sealed class DrawingSurface : MonoBehaviour
 	public void CreateStamp(Vector3 position, DrawingStampShape shape)
 	{
 		GameObject stamp = new GameObject($"{shape}Stamp");
+		stamp.AddComponent<RuntimeRoundObject>();
 		stamp.transform.SetParent(transform, true);
 		stamp.transform.position = position;
 		stamp.transform.localScale = new Vector3(stampSize.x, stampSize.y, 1f);
+
+		// レイヤーを設定する
+		int layer = LayerMask.NameToLayer(stampLayerName);
+		if (layer != -1) { // レイヤーが見つかった場合のみ設定する
+			stamp.layer = layer;
+		}
 
 		SpriteRenderer renderer = stamp.AddComponent<SpriteRenderer>();
 		renderer.sprite = RuntimeSpriteFactory.GetDrawingStampSprite(shape);

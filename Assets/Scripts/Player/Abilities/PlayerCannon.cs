@@ -113,6 +113,13 @@ public sealed class PlayerCannon : MonoBehaviour
 		activeProjectile?.StopProjectile();
 	}
 
+	// 次ラウンドに向けて選択状態と発射中オブジェクト参照を初期化する。
+	public void ResetForNextRound()
+	{
+		StopActiveProjectile();
+		selectedIndex = 0;
+	}
+
 	// 弾が破棄されたら参照を外す。
 	public void ClearProjectileReference(CannonProjectile projectile)
 	{
@@ -219,6 +226,7 @@ public sealed class PlayerCannon : MonoBehaviour
 		}
 
 		selectionMarker = new GameObject($"{name}_SelectionMarker");
+		selectionMarker.AddComponent<RuntimeRoundObject>();
 		selectionMarker.transform.SetParent(null, true);
 		selectionMarkerRenderer = selectionMarker.AddComponent<SpriteRenderer>();
 		selectionMarkerRenderer.sprite = RuntimeSpriteFactory.UnitSquare;
