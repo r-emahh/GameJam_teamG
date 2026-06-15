@@ -14,14 +14,30 @@ public sealed class GoalZoneTrigger : MonoBehaviour
 	// プレイヤーが入ったらゴール成立を通知する。
 	private void OnTriggerEnter2D(Collider2D other)
 	{
-		if (GameManager.Instance == null || GameManager.currentState != GameState.Game)
+		if (GameManager.Instance == null || !TryGetPlayerSide(other, out MatchSide side))
 		{
 			return;
 		}
 
-		if (other.GetComponentInParent<PlayerIdentity>() != null)
+		GameManager.Instance.TryMarkGoalReached(side);
+	}
+
+	// 接触した Collider がプレイヤーに属する場合だけ、その役割を返す。
+	public static bool TryGetPlayerSide(Collider2D other, out MatchSide side)
+	{
+		side = default;
+		if (other == null)
 		{
-			GameManager.Instance.MarkGoalReached();
+			return false;
 		}
+
+		PlayerIdentity player = other.GetComponentInParent<PlayerIdentity>();
+		if (player == null)
+		{
+			return false;
+		}
+
+		side = player.ControlledSide;
+		return true;
 	}
 }

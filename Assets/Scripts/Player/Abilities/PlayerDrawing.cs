@@ -1,173 +1,185 @@
-using TMPro;
 using UnityEngine;
 
 [DisallowMultipleComponent]
-// 描画フェーズ中のカーソル移動と配置入力を担当する。
+// 自由描画の入力を Unity 非依存レコーダーへ橋渡しする。
 public sealed class PlayerDrawing : MonoBehaviour
 {
-	// 利用する固定図形を管理する。
-	private static readonly DrawingStampShape[] Shapes =
-	{
-		DrawingStampShape.Square,
-		DrawingStampShape.Circle,
-		DrawingStampShape.Triangle
-	};
-
-	// カーソルの移動速度を設定する。
-	[SerializeField]
+	[SerializeField, Min(0f)]
 	private float cursorSpeed = 3.2f;
 
-	// カメラ端からカーソルを止める余白を保持する。
-	[SerializeField]
-	private Vector2 cameraEdgePadding = new Vector2(0.7f, 0.7f);
+	[SerializeField, Min(0)]
+	private int maxPointCount = 256;
 
-	// カーソル表示の倍率を保持する。
-	private const float CursorVisualScale = 0.5f;
-	// カーソル上に表示する残数ラベルの高さを保持する。
-	private const float CursorLabelOffsetY = 0.78f;
+	[SerializeField, Min(0f)]
+	private float maxTotalLineLength = 30f;
 
-	// カーソル表示を保持する。
-	private GameObject cursorVisual;
-	// カーソル表示の描画コンポーネントを保持する。
-	private SpriteRenderer cursorRenderer;
-	// カーソル上の残数表示を保持する。
-	private TextMeshPro cursorCountText;
-	// 入力方向を保持する。
+	[SerializeField, Min(0f)]
+	private float minPointSpacing = 0.08f;
+
+	private const float CursorVisualScale = 0.22f;
 	private Vector2 moveInput;
-	// 現在のカーソル位置を保持する。
-	private Vector3 cursorPosition;
-	// 現在選択中の図形を保持する。
-	private int currentShapeIndex;
-	// 現在の陣営を保持する。
+	private bool drawButtonPressed;
 	private MatchSide controlledSide = MatchSide.GoalRunner;
-	// 表示用カメラを保持する。
-	private Camera targetCamera;
-	// 描画面を保持する。
 	private DrawingSurface drawingSurface;
+	private DrawingRecorder recorder;
+	private DrawingPlayerSlot playerSlot;
+	private GameObject cursorVisual;
+	private SpriteRenderer cursorRenderer;
 
+	public DrawingArtifactData Artifact => recorder?.Artifact;
+	public int MaxPointCount => maxPointCount;
+	public bool IsConfirmed => recorder != null && recorder.Artifact.IsConfirmed;
+	public int PointCount => recorder?.Artifact.PointCount ?? 0;
 
-	// 現在選択中の図形を返す。
-	public DrawingStampShape CurrentShape => Shapes[currentShapeIndex];
+	// このプレイヤーが確定した描画を発射用オブジェクトへ複製する。
+	public bool TryConfigureProjectile(CannonProjectile projectile)
+	{
+		return EnsureRecorder() && drawingSurface.TryConfigureProjectile(playerSlot, projectile);
+	}
 
-	// 開始位置を現在座標に合わせる。
 	private void Awake()
 	{
-		cursorPosition = transform.position;
-		targetCamera = Camera.main;
-		drawingSurface = FindFirstObjectByType<DrawingSurface>();
+		EnsureRecorder();
 		EnsureCursorVisual();
-		UpdateCursorVisual();
-		UpdateCursorBudgetLabel();
 		SetCursorVisible(false);
 	}
 
-	// 破棄時にランタイム生成したカーソルを掃除する。
 	private void OnDestroy()
 	{
+		if (drawingSurface != null)
+		{
+			drawingSurface.Unregister(this);
+		}
+
 		if (cursorVisual != null)
 		{
 			Destroy(cursorVisual);
 		}
 	}
 
-	// 移動入力を保持する。
 	public void SetMoveInput(Vector2 input)
 	{
 		moveInput = input;
 	}
 
-	// 図形を次の候補へ切り替える。
-	public void CycleShape()
+	public void SetDrawButtonPressed(bool pressed)
 	{
-		if (!IsDrawPhase())
+		drawButtonPressed = pressed;
+		if (!IsDrawPhase() || !EnsureRecorder())
+		{
+			if (!pressed)
+			{
+				recorder?.SetDrawingActive(false);
+			}
+			return;
+		}
+
+		if (recorder.SetDrawingActive(pressed))
+		{
+			drawingSurface.RefreshVisual(playerSlot);
+		}
+	}
+
+	public void ClearDrawing()
+	{
+		if (!IsDrawPhase() || !EnsureRecorder())
 		{
 			return;
 		}
 
-		currentShapeIndex = (currentShapeIndex + 1) % Shapes.Length;
-		UpdateCursorVisual();
-		UpdateCursorBudgetLabel();
+		drawButtonPressed = false;
+		recorder.Clear();
+		drawingSurface.RefreshVisual(playerSlot);
 	}
 
-	// このカーソルが担当する陣営を設定する。
+	public void ConfirmDrawing()
+	{
+		if (!IsDrawPhase() || !EnsureRecorder())
+		{
+			return;
+		}
+
+		drawButtonPressed = false;
+		recorder.Confirm();
+		drawingSurface.RefreshVisual(playerSlot);
+	}
+
 	public void ConfigureControlledSide(MatchSide side)
 	{
 		controlledSide = side;
-		UpdateCursorBudgetLabel();
+		UpdateCursorColor();
 	}
 
-	// 現在の図形を1枚だけ貼り付ける。
-	public void PlaceStamp()
-	{
-		if (!IsDrawPhase())
-		{
-			return;
-		}
-
-		if (!IsCursorInsideCameraView())
-		{
-			return;
-		}
-
-		if (drawingSurface == null)
-		{
-			drawingSurface = FindFirstObjectByType<DrawingSurface>();
-		}
-
-		if (drawingSurface == null)
-		{
-			return;
-		}
-
-		drawingSurface.CreateStamp(cursorPosition, CurrentShape);
-	}
-
-	// 次ラウンドに向けてカーソルと図形選択を初期化する。
 	public void ResetForNextRound()
 	{
 		moveInput = Vector2.zero;
-		currentShapeIndex = 0;
-		cursorPosition = transform.position;
-		UpdateCursorVisual();
-		UpdateCursorBudgetLabel();
-		if (cursorVisual != null)
+		drawButtonPressed = false;
+		if (EnsureRecorder())
 		{
-			cursorVisual.transform.position = cursorPosition;
+			recorder.Clear();
+			recorder.SetCursorPosition(ToData(transform.position));
+			drawingSurface.RefreshVisual(playerSlot);
+			UpdateCursorPosition();
 		}
 
 		SetCursorVisible(false);
 	}
 
-	// 描画フェーズ中だけカーソルを進める。
 	public void TickFixed()
 	{
-		if (!IsDrawPhase())
+		if (!IsDrawPhase() || !EnsureRecorder())
 		{
+			recorder?.SetDrawingActive(false);
+			drawButtonPressed = false;
 			SetCursorVisible(false);
 			return;
 		}
 
-		if (targetCamera == null)
+		DrawingRectData bounds = drawingSurface.DataBounds;
+		recorder.SetBounds(bounds);
+		bool changed = recorder.MoveCursor(
+			moveInput.x * cursorSpeed * Time.fixedDeltaTime,
+			moveInput.y * cursorSpeed * Time.fixedDeltaTime);
+
+		if (drawButtonPressed && !recorder.IsDrawing && !recorder.Artifact.IsConfirmed)
 		{
-			targetCamera = Camera.main;
+			changed |= recorder.SetDrawingActive(true);
 		}
 
-		if (targetCamera == null)
+		if (changed)
 		{
-			SetCursorVisible(false);
-			return;
+			drawingSurface.RefreshVisual(playerSlot);
 		}
 
 		EnsureCursorVisual();
-		UpdateCursorVisual();
-		cursorPosition += (Vector3)(moveInput * cursorSpeed * Time.fixedDeltaTime);
-		cursorPosition = ClampToCameraView(cursorPosition);
-		cursorVisual.transform.position = cursorPosition;
-		UpdateCursorBudgetLabel();
+		UpdateCursorPosition();
 		SetCursorVisible(true);
 	}
 
-	// カーソル用の表示オブジェクトを必要なら生成する。
+	private bool EnsureRecorder()
+	{
+		if (recorder != null && drawingSurface != null)
+		{
+			return true;
+		}
+
+		drawingSurface = FindFirstObjectByType<DrawingSurface>();
+		if (drawingSurface == null)
+		{
+			return false;
+		}
+
+		playerSlot = drawingSurface.Register(this);
+		DrawingLimitsData limits = new DrawingLimitsData(maxPointCount, maxTotalLineLength, minPointSpacing);
+		recorder = new DrawingRecorder(
+			drawingSurface.GetArtifact(playerSlot),
+			drawingSurface.DataBounds,
+			limits,
+			ToData(transform.position));
+		UpdateCursorColor();
+		return true;
+	}
+
 	private void EnsureCursorVisual()
 	{
 		if (cursorVisual != null)
@@ -176,128 +188,55 @@ public sealed class PlayerDrawing : MonoBehaviour
 		}
 
 		cursorVisual = new GameObject("DrawingCursor");
-		cursorVisual.AddComponent<RuntimeRoundObject>();
-		cursorVisual.transform.SetParent(null, true);
 		cursorRenderer = cursorVisual.AddComponent<SpriteRenderer>();
-		cursorRenderer.color = new Color(0.15f, 0.95f, 1f, 0.7f);
-		cursorRenderer.sortingOrder = 3;
-		cursorVisual.transform.localScale = new Vector3(CursorVisualScale, CursorVisualScale, 1f);
-
-		GameObject cursorCountObject = new GameObject("DrawingCursorCount");
-		cursorCountObject.transform.SetParent(cursorVisual.transform, false);
-		cursorCountObject.transform.localPosition = new Vector3(0f, CursorLabelOffsetY, 0f);
-		cursorCountObject.transform.localScale = Vector3.one * 0.1f;
-		cursorCountText = cursorCountObject.AddComponent<TextMeshPro>();
-		cursorCountText.alignment = TextAlignmentOptions.Center;
-		cursorCountText.fontSize = 4f;
-		cursorCountText.color = Color.white;
-		cursorCountText.enableAutoSizing = false;
-		cursorCountText.text = "x0";
-
-		MeshRenderer cursorCountRenderer = cursorCountObject.GetComponent<MeshRenderer>();
-		if (cursorCountRenderer != null)
-		{
-			cursorCountRenderer.sortingOrder = 4;
-		}
+		cursorRenderer.sprite = RuntimeSpriteFactory.UnitSquare;
+		cursorRenderer.sortingOrder = 4;
+		cursorVisual.transform.localScale = Vector3.one * CursorVisualScale;
+		UpdateCursorColor();
+		UpdateCursorPosition();
 	}
 
-	// カーソルの見た目を現在の図形に合わせる。
-	private void UpdateCursorVisual()
+	private void UpdateCursorColor()
 	{
 		if (cursorRenderer == null)
 		{
 			return;
 		}
 
-		cursorRenderer.sprite = RuntimeSpriteFactory.GetDrawingStampSprite(CurrentShape);
+		Color color = drawingSurface != null
+			? drawingSurface.GetPlayerColor(playerSlot)
+			: controlledSide == MatchSide.GoalRunner
+				? new Color(0.15f, 0.95f, 1f, 0.95f)
+				: new Color(1f, 0.35f, 0.25f, 0.95f);
+		color.a = 0.9f;
+		cursorRenderer.color = color;
 	}
 
-	// カーソル上の残数表示を更新する。
-	private void UpdateCursorBudgetLabel()
+	private void UpdateCursorPosition()
 	{
-		if (cursorCountText == null)
+		if (cursorVisual == null || recorder == null)
 		{
 			return;
 		}
 
-		cursorCountText.text = $"x{GetRemainingStampCount()}";
+		DrawingPointData point = recorder.CursorPosition;
+		cursorVisual.transform.position = new Vector3(point.X, point.Y, transform.position.z);
 	}
 
-	// カーソルの表示を切り替える。
 	private void SetCursorVisible(bool visible)
 	{
-		if (cursorVisual == null)
+		if (cursorVisual != null)
 		{
-			return;
+			cursorVisual.SetActive(visible);
 		}
-
-		cursorVisual.SetActive(visible);
 	}
 
-	// カメラ表示範囲内にカーソルを収める。
-	private Vector3 ClampToCameraView(Vector3 worldPosition)
-	{
-		Rect viewBounds = GetPaddedCameraViewBounds();
-		return new Vector3(
-			Mathf.Clamp(worldPosition.x, viewBounds.xMin, viewBounds.xMax),
-			Mathf.Clamp(worldPosition.y, viewBounds.yMin, viewBounds.yMax),
-			worldPosition.z);
-	}
+	private static DrawingPointData ToData(Vector3 position) => new DrawingPointData(position.x, position.y);
 
-	// カーソルがカメラ表示範囲内かを返す。
-	private bool IsCursorInsideCameraView()
-	{
-		return GetPaddedCameraViewBounds().Contains(cursorPosition);
-	}
-
-	// カメラのワールド表示範囲を返す。
-	private Rect GetCameraViewBounds()
-	{
-		if (targetCamera == null)
-		{
-			targetCamera = Camera.main;
-		}
-
-		if (targetCamera == null || !targetCamera.orthographic)
-		{
-			return new Rect(-10f, -5f, 20f, 10f);
-		}
-
-		float height = targetCamera.orthographicSize * 2f;
-		float width = height * targetCamera.aspect;
-		Vector3 center = targetCamera.transform.position;
-		return new Rect(center.x - width * 0.5f, center.y - height * 0.5f, width, height);
-	}
-
-	// カーソル用に少し内側へ縮めた表示範囲を返す。
-	private Rect GetPaddedCameraViewBounds()
-	{
-		Rect bounds = GetCameraViewBounds();
-		float horizontalPadding = Mathf.Min(cameraEdgePadding.x, Mathf.Max(0f, bounds.width * 0.5f - 0.01f));
-		float verticalPadding = Mathf.Min(cameraEdgePadding.y, Mathf.Max(0f, bounds.height * 0.5f - 0.01f));
-		bounds.xMin += horizontalPadding;
-		bounds.xMax -= horizontalPadding;
-		bounds.yMin += verticalPadding;
-		bounds.yMax -= verticalPadding;
-		return bounds;
-	}
-
-	// 現在の陣営に残っているスタンプ数を返す。
-	private int GetRemainingStampCount()
-	{
-		if (GameManager.Instance == null)
-		{
-			return 0;
-		}
-
-		return controlledSide == MatchSide.Blocker
-			? GameManager.Instance.BlockerShapesRemaining
-			: GameManager.Instance.GoalRunnerShapesRemaining;
-	}
-
-	// 描画フェーズかどうかを返す。
 	private static bool IsDrawPhase()
 	{
-		return GameManager.Instance != null && GameManager.currentState == GameState.Game && GameManager.Instance.CurrentPhase == MatchPhase.Draw;
+		return GameManager.Instance != null
+			&& GameManager.currentState == GameState.Game
+			&& GameManager.Instance.CurrentPhase == MatchPhase.Draw;
 	}
 }

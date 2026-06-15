@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.InputSystem;
 
 [DisallowMultipleComponent]
 // 試合開始時にプレイヤーをスポーン地点へ配置する。
@@ -67,17 +66,18 @@ public sealed class PlayerSpawnCoordinator : MonoBehaviour
 			blockerPlayer = players[1] == goalRunnerPlayer ? players[0] : players[1];
 		}
 
-		PlacePlayer(goalRunnerPlayer, goalRunnerSpawn, UsesGamepad(goalRunnerPlayer));
+		InputManager.Instance.RefreshPlayerInputAssignments();
+		PlacePlayer(goalRunnerPlayer, goalRunnerSpawn);
 		if (blockerPlayer != null && blockerPlayer != goalRunnerPlayer)
 		{
-			PlacePlayer(blockerPlayer, blockerSpawn, UsesGamepad(blockerPlayer));
+			PlacePlayer(blockerPlayer, blockerSpawn);
 		}
 
 		InputManager.Instance.ResetDashAvailabilityForAllPlayers();
 	}
 
 	// 1人分の配置と入力設定をまとめる。
-	private static void PlacePlayer(PlayerController player, Transform spawn, bool useGamepad)
+	private static void PlacePlayer(PlayerController player, Transform spawn)
 	{
 		if (player == null)
 		{
@@ -88,24 +88,5 @@ public sealed class PlayerSpawnCoordinator : MonoBehaviour
 		{
 			player.transform.position = spawn.position;
 		}
-
-		player.ConfigureLocalInput(player.ControlledSide, useGamepad);
-	}
-
-	// 既存の入力スキームを優先し、未設定なら登録順で決める。
-	private static bool UsesGamepad(PlayerController player)
-	{
-		if (player == null)
-		{
-			return false;
-		}
-
-		PlayerInput input = player.GetComponent<PlayerInput>();
-		if (input != null && !string.IsNullOrEmpty(input.currentControlScheme))
-		{
-			return input.currentControlScheme == "Gamepad";
-		}
-
-		return InputManager.Instance != null && InputManager.Instance.GetPlayerIndex(player) > 0;
 	}
 }

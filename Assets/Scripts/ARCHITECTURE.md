@@ -16,14 +16,14 @@ The runtime code is organized by responsibility instead of by scene.
 - `Player/Abilities/PlayerDash`: Dash state and physics override.
 - `Player/Abilities/PlayerStun`: Stun reaction.
 - `Player/Abilities/PlayerCannon`: Cannon selection and projectile launching.
-- `Player/Abilities/PlayerDrawing`: Drawing cursor, shape selection, and placement input.
+- `Player/Abilities/PlayerDrawing`: Unity input and cursor adapter for free drawing.
 
 Add or remove player abilities as components. Avoid adding gameplay logic back into `PlayerController`.
 
 ## Gameplay
 
 - `Gameplay/Projectiles`: Projectile behavior.
-- `Gameplay/Drawing`: Drawing surfaces and generated collision stamps.
+- `Gameplay/Drawing`: Unity-independent drawing data/recording plus Unity surface rendering. Confirmed data is reused to build each player's projectile visuals and compound colliders.
 - `Gameplay/Goals`: Goal detection.
 - `Gameplay/Stage`: Runtime stage construction, cannon mounts, and player spawning.
 

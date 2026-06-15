@@ -36,16 +36,21 @@ public sealed class MatchUIBootstrap : MonoBehaviour
 	// 初回表示時に HUD を作成して同期する。
 	private void Start()
 	{
-		EnsureView();
-		Subscribe();
-		Refresh();
+		HandleSceneLoaded(SceneManager.GetActiveScene(), LoadSceneMode.Single);
 	}
 
 	// プレイヤーの大砲選択は入力で変わるため毎フレーム追従する。
 	private void Update()
 	{
-		RefreshDrawingShape();
+		if (view == null || !view.gameObject.activeSelf)
+		{
+			return;
+		}
+
+		RefreshDrawingStatus();
 		RefreshCannonSelection();
+		RefreshLaunchPower();
+		RefreshBlockerRaceAttackCooldown();
 	}
 
 	// 購読を解除する。
@@ -58,12 +63,19 @@ public sealed class MatchUIBootstrap : MonoBehaviour
 	// 該当シーンへ入ったら HUD を再同期する。
 	private void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
 	{
-		if (scene.name != "Game" && scene.name != "Rema" && scene.name != "Title")
+		if (!SceneCatalog.IsMatch(scene.name))
 		{
+			Unsubscribe();
+			if (view != null)
+			{
+				view.gameObject.SetActive(false);
+			}
+
 			return;
 		}
 
 		EnsureView();
+		view.gameObject.SetActive(true);
 		Subscribe();
 		Refresh();
 	}
@@ -99,7 +111,6 @@ public sealed class MatchUIBootstrap : MonoBehaviour
 		subscribedManager.OnPhaseTimerChanged += view.SetTimer;
 		subscribedManager.OnMatchResultChanged += view.SetResult;
 		subscribedManager.OnLaunchBudgetChanged += view.SetLaunchBudget;
-		subscribedManager.OnShapeBudgetChanged += view.SetShapeBudget;
 	}
 
 	// GameManager のイベント接続を解除する。
@@ -118,7 +129,6 @@ public sealed class MatchUIBootstrap : MonoBehaviour
 		subscribedManager.OnPhaseTimerChanged -= view.SetTimer;
 		subscribedManager.OnMatchResultChanged -= view.SetResult;
 		subscribedManager.OnLaunchBudgetChanged -= view.SetLaunchBudget;
-		subscribedManager.OnShapeBudgetChanged -= view.SetShapeBudget;
 		subscribedManager = null;
 	}
 
@@ -138,9 +148,10 @@ public sealed class MatchUIBootstrap : MonoBehaviour
 		view.SetTimer(manager.CurrentPhaseTimeRemaining, manager.CurrentPhaseDuration);
 		view.SetResult(manager.CurrentResult);
 		view.SetLaunchBudget(manager.GoalRunnerLaunchesRemaining, manager.BlockerLaunchesRemaining);
-		view.SetShapeBudget(manager.GoalRunnerShapesRemaining, manager.BlockerShapesRemaining);
-		RefreshDrawingShape();
+		RefreshDrawingStatus();
 		RefreshCannonSelection();
+		RefreshLaunchPower();
+		RefreshBlockerRaceAttackCooldown();
 	}
 
 	// 陣営変更時のラウンド表示を更新する。
@@ -165,12 +176,14 @@ public sealed class MatchUIBootstrap : MonoBehaviour
 
 		if (GameManager.Instance == null || GameManager.currentState != GameState.Game || GameManager.Instance.CurrentPhase != MatchPhase.Place || InputManager.Instance == null)
 		{
-			view.SetCannonSelection(-1, -1);
+			view.SetCannonSelection(-1, 0f, -1, 0f, MatchSide.GoalRunner);
 			return;
 		}
 
 		int goalRunnerOrder = -1;
+		float goalRunnerAngle = 0f;
 		int blockerOrder = -1;
+		float blockerAngle = 0f;
 		foreach (PlayerController player in InputManager.Instance.GetRegisteredPlayers())
 		{
 			if (player == null)
@@ -181,18 +194,96 @@ public sealed class MatchUIBootstrap : MonoBehaviour
 			if (player.ControlledSide == MatchSide.GoalRunner)
 			{
 				goalRunnerOrder = player.SelectedCannonOrder;
+				goalRunnerAngle = player.SelectedCannonAngle;
 			}
 			else if (player.ControlledSide == MatchSide.Blocker)
 			{
 				blockerOrder = player.SelectedCannonOrder;
+				blockerAngle = player.SelectedCannonAngle;
 			}
 		}
 
-		view.SetCannonSelection(goalRunnerOrder, blockerOrder);
+		view.SetCannonSelection(
+			goalRunnerOrder,
+			goalRunnerAngle,
+			blockerOrder,
+			blockerAngle,
+			GameManager.Instance.CurrentSide);
 	}
 
-	// 現在の図形を HUD に反映する。
-	private void RefreshDrawingShape()
+	// Place 中、現在手番プレイヤーの発射パワーだけを HUD に反映する。
+	private void RefreshLaunchPower()
+	{
+		if (view == null)
+		{
+			return;
+		}
+
+		if (GameManager.Instance == null
+			|| GameManager.currentState != GameState.Game
+			|| GameManager.Instance.CurrentPhase != MatchPhase.Place
+			|| InputManager.Instance == null)
+		{
+			view.SetLaunchPower(false, MatchSide.GoalRunner, 0f, 0f);
+			return;
+		}
+
+		MatchSide currentSide = GameManager.Instance.CurrentSide;
+		foreach (PlayerController player in InputManager.Instance.GetRegisteredPlayers())
+		{
+			if (player == null || player.ControlledSide != currentSide || !player.IsPreparingCannonLaunch)
+			{
+				continue;
+			}
+
+			view.SetLaunchPower(
+				true,
+				currentSide,
+				player.NormalizedCannonLaunchPower,
+				player.CannonLaunchPower);
+			return;
+		}
+
+		view.SetLaunchPower(false, currentSide, 0f, 0f);
+	}
+
+	// Race 中の Blocker 妨害弾クールダウンを HUD に反映する。
+	private void RefreshBlockerRaceAttackCooldown()
+	{
+		if (view == null)
+		{
+			return;
+		}
+
+		bool isRace = GameManager.Instance != null
+			&& GameManager.currentState == GameState.Game
+			&& GameManager.Instance.CurrentPhase == MatchPhase.Race;
+		if (!isRace || InputManager.Instance == null)
+		{
+			view.SetBlockerRaceAttackCooldown(false, true, 0f, 0f);
+			return;
+		}
+
+		foreach (PlayerController player in InputManager.Instance.GetRegisteredPlayers())
+		{
+			if (player == null || player.ControlledSide != MatchSide.Blocker)
+			{
+				continue;
+			}
+
+			view.SetBlockerRaceAttackCooldown(
+				true,
+				player.IsBlockerRaceAttackReady,
+				player.BlockerRaceAttackCooldownRemaining,
+				player.BlockerRaceAttackCooldownDuration);
+			return;
+		}
+
+		view.SetBlockerRaceAttackCooldown(false, true, 0f, 0f);
+	}
+
+	// 2人分の自由描画の使用量と確定状態を HUD に反映する。
+	private void RefreshDrawingStatus()
 	{
 		if (view == null)
 		{
@@ -201,12 +292,16 @@ public sealed class MatchUIBootstrap : MonoBehaviour
 
 		if (GameManager.Instance == null || GameManager.currentState != GameState.Game || GameManager.Instance.CurrentPhase != MatchPhase.Draw || InputManager.Instance == null)
 		{
-			view.SetDrawingShape(DrawingStampShape.Square, DrawingStampShape.Square);
+			view.SetDrawingStatus(0, 0, false, 0, 0, false);
 			return;
 		}
 
-		DrawingStampShape goalRunnerShape = DrawingStampShape.Square;
-		DrawingStampShape blockerShape = DrawingStampShape.Square;
+		int goalRunnerPoints = 0;
+		int goalRunnerMaxPoints = 0;
+		bool goalRunnerConfirmed = false;
+		int blockerPoints = 0;
+		int blockerMaxPoints = 0;
+		bool blockerConfirmed = false;
 		foreach (PlayerController player in InputManager.Instance.GetRegisteredPlayers())
 		{
 			if (player == null)
@@ -216,14 +311,24 @@ public sealed class MatchUIBootstrap : MonoBehaviour
 
 			if (player.ControlledSide == MatchSide.GoalRunner)
 			{
-				goalRunnerShape = player.CurrentDrawingShape;
+				goalRunnerPoints = player.DrawingPointCount;
+				goalRunnerMaxPoints = player.DrawingMaxPointCount;
+				goalRunnerConfirmed = player.IsDrawingConfirmed;
 			}
 			else if (player.ControlledSide == MatchSide.Blocker)
 			{
-				blockerShape = player.CurrentDrawingShape;
+				blockerPoints = player.DrawingPointCount;
+				blockerMaxPoints = player.DrawingMaxPointCount;
+				blockerConfirmed = player.IsDrawingConfirmed;
 			}
 		}
 
-		view.SetDrawingShape(goalRunnerShape, blockerShape);
+		view.SetDrawingStatus(
+			goalRunnerPoints,
+			goalRunnerMaxPoints,
+			goalRunnerConfirmed,
+			blockerPoints,
+			blockerMaxPoints,
+			blockerConfirmed);
 	}
 }

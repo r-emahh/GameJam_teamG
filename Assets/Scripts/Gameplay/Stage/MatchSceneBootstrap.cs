@@ -57,7 +57,7 @@ public sealed class MatchSceneBootstrap : MonoBehaviour
 	// 試合シーンを読み込んだらステージを再構築する。
 	private void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
 	{
-		if (scene.name != "Rema" && scene.name != "Game")
+		if (!SceneCatalog.IsMatch(scene.name))
 		{
 			return;
 		}

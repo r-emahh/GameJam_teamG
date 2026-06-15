@@ -31,7 +31,6 @@ public sealed class PlayerNameplate : MonoBehaviour
 	private int lastPlayerIndex = int.MinValue;
 	// 頭上位置計算に使う半分の高さを保持する。
 	private float cachedHalfHeight = 0.5f;
-
 	// 必要な参照とラベルを初期化する。
 	private void Awake()
 	{
@@ -161,7 +160,8 @@ public sealed class PlayerNameplate : MonoBehaviour
 			return;
 		}
 
-		labelTransform.localPosition = new Vector3(0f, cachedHalfHeight + verticalOffset, 0f);
+		labelTransform.position = transform.position + new Vector3(0f, cachedHalfHeight + verticalOffset, 0f);
+		labelTransform.rotation = Quaternion.identity;
 	}
 
 	// プレイヤー描画物の高さから頭上オフセットを求める。
