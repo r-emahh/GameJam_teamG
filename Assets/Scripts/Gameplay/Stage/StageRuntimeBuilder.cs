@@ -8,6 +8,8 @@ public sealed class StageRuntimeBuilder : MonoBehaviour
 	private const string StageSurfaceName = "StageSurface";
 	// ゴールゾーンの名前。
 	private const string GoalZoneName = "GoalZone";
+	// 画面上中央に置く唯一の大砲名。
+	private const string CannonName = "Cannon_TopCenter";
 	// ステージ全体の描画可能領域を保持する。
 	private static readonly Vector2 StageSurfaceSize = new Vector2(20f, 10.9f);
 	// ステージ全体の描画可能領域の中心を保持する。
@@ -21,10 +23,7 @@ public sealed class StageRuntimeBuilder : MonoBehaviour
 		EnsureGoalZone();
 		CreateBoundaryIfNeeded("StageTop", new Vector3(0f, 5.35f, 0f), new Vector2(20f, 0.18f));
 		CreateBoundaryIfNeeded("StageBottom", new Vector3(0f, -5.55f, 0f), new Vector2(20f, 0.18f));
-		CreateCannonMount("TopLeft", 0);
-		CreateCannonMount("TopRight", 1);
-		CreateCannonMount("BottomLeft", 2);
-		CreateCannonMount("BottomRight", 3);
+		EnsureSingleCannonMount();
 		CreateSpawnPointIfNeeded(PlayerSpawnCoordinator.GoalRunnerSpawnName, new Vector3(-7.4f, -3.1f, 0f));
 		CreateSpawnPointIfNeeded(PlayerSpawnCoordinator.BlockerSpawnName, new Vector3(-5.6f, -3.1f, 0f));
 	}
@@ -84,14 +83,25 @@ public sealed class StageRuntimeBuilder : MonoBehaviour
 		ConfigureVisual(boundary, new Color(0.1f, 0.1f, 0.1f, 1f), 0);
 	}
 
-	// 大砲マウントを生成し、順序を設定する。
-	private void CreateCannonMount(string suffix, int order)
+	// 既存の余分な大砲を除去し、画面上中央の一基だけを用意する。
+	private void EnsureSingleCannonMount()
 	{
-		GameObject cannon = FindOrCreate($"Cannon_{suffix}");
+		CannonMount[] existingMounts = FindObjectsByType<CannonMount>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+		for (int i = 0; i < existingMounts.Length; i++)
+		{
+			if (existingMounts[i] != null && existingMounts[i].gameObject.name != CannonName)
+			{
+				existingMounts[i].gameObject.SetActive(false);
+				Destroy(existingMounts[i].gameObject);
+			}
+		}
+
+		GameObject cannon = FindOrCreate(CannonName);
+		cannon.SetActive(true);
 		cannon.transform.localScale = new Vector3(0.55f, 0.55f, 1f);
 		ConfigureVisual(cannon, new Color(0.8f, 0.65f, 0.2f, 1f), 1);
 		CannonMount mount = cannon.GetComponent<CannonMount>() ?? cannon.AddComponent<CannonMount>();
-		mount.Configure(order);
+		mount.Configure(0);
 	}
 
 	// スポーン地点を用意する。

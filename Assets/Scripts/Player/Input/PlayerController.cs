@@ -5,7 +5,7 @@ using UnityEngine.InputSystem;
 [RequireComponent(typeof(Rigidbody2D), typeof(BoxCollider2D), typeof(PlayerInput))]
 [RequireComponent(typeof(PlayerIdentity), typeof(PlayerContactSensor2D), typeof(PlayerMotor2D))]
 [RequireComponent(typeof(PlayerDash), typeof(PlayerStun), typeof(PlayerCannon))]
-[RequireComponent(typeof(PlayerDrawing))]
+[RequireComponent(typeof(PlayerDrawing), typeof(BlockerRaceAttackCooldown))]
 // 入力メッセージを各プレイヤー能力へ振り分ける互換コンポーネント。
 public sealed class PlayerController : MonoBehaviour
 {
@@ -21,7 +21,9 @@ public sealed class PlayerController : MonoBehaviour
 	private PlayerStun stun;
 	// 大砲の選択と発射を管理する。
 	private PlayerCannon cannon;
-	// 描画入力とスタンプ生成を管理する。
+	// Race 中の Blocker 妨害弾クールダウンを管理する。
+	private BlockerRaceAttackCooldown blockerRaceAttackCooldown;
+	// 自由描画入力とデータ記録を管理する。
 	private PlayerDrawing drawing;
 	// 頭上ラベルの表示を管理する。
 	private PlayerNameplate nameplate;
@@ -44,8 +46,28 @@ public sealed class PlayerController : MonoBehaviour
 	public bool IsDashing => dash != null && dash.IsDashing;
 	// 現在選択中の大砲番号を返す。
 	public int SelectedCannonOrder => cannon != null ? cannon.SelectedMountOrder : -1;
-	// 現在選択中の描画形状を返す。
-	public DrawingStampShape CurrentDrawingShape => drawing != null ? drawing.CurrentShape : DrawingStampShape.Square;
+	// 現在選択中の大砲のステージ中央基準角度を返す。
+	public float SelectedCannonAngle => cannon != null ? cannon.SelectedMountAngle : 0f;
+	// 現在の発射パワーを返す。
+	public float CannonLaunchPower => cannon != null ? cannon.CurrentLaunchPower : 0f;
+	// HUD 用に正規化した発射パワーを返す。
+	public float NormalizedCannonLaunchPower => cannon != null ? cannon.NormalizedLaunchPower : 0f;
+	// 現在発射準備中かを返す。
+	public bool IsPreparingCannonLaunch => cannon != null && cannon.IsPreparingLaunch;
+	// Race 中の Blocker 妨害弾が使用可能かを返す。
+	public bool IsBlockerRaceAttackReady => blockerRaceAttackCooldown == null || blockerRaceAttackCooldown.IsReady;
+	// Race 中の Blocker 妨害弾クールダウン残り時間を返す。
+	public float BlockerRaceAttackCooldownRemaining => blockerRaceAttackCooldown != null ? blockerRaceAttackCooldown.RemainingTime : 0f;
+	// Race 中の Blocker 妨害弾クールダウン総時間を返す。
+	public float BlockerRaceAttackCooldownDuration => blockerRaceAttackCooldown != null ? blockerRaceAttackCooldown.Duration : 0f;
+	// 現在記録済みの描画点数を返す。
+	public int DrawingPointCount => drawing?.PointCount ?? 0;
+	// 描画点数の上限を返す。
+	public int DrawingMaxPointCount => drawing?.MaxPointCount ?? 0;
+	// 描画が確定済みかを返す。
+	public bool IsDrawingConfirmed => drawing != null && drawing.IsConfirmed;
+	// Unity 非依存の描画データを返す。
+	public DrawingArtifactData DrawingArtifact => drawing?.Artifact;
 
 	// 必要なコンポーネントをキャッシュし、入力登録を試みる。
 	private void Awake()
@@ -56,6 +78,7 @@ public sealed class PlayerController : MonoBehaviour
 		dash = GetComponent<PlayerDash>();
 		stun = GetComponent<PlayerStun>();
 		cannon = GetComponent<PlayerCannon>();
+		blockerRaceAttackCooldown = GetComponent<BlockerRaceAttackCooldown>();
 		drawing = GetComponent<PlayerDrawing>();
 		nameplate = GetComponent<PlayerNameplate>();
 		if (nameplate == null)
@@ -75,6 +98,7 @@ public sealed class PlayerController : MonoBehaviour
 	{
 		RefreshBlockerPresentationState();
 		RegisterWithInputManager();
+		InputManager.Instance?.RefreshPlayerInputAssignments();
 		nameplate?.RefreshDisplay();
 	}
 
@@ -146,6 +170,12 @@ public sealed class PlayerController : MonoBehaviour
 		}
 	}
 
+	// Place 中の大砲角度調整入力を渡す。
+	public void OnAim(InputValue inputValue)
+	{
+		cannon.SetAimInput(inputValue.Get<float>());
+	}
+
 	// ジャンプ入力を移動コンポーネントへ渡す。
 	public void OnJump(InputValue inputValue)
 	{
@@ -182,8 +212,32 @@ public sealed class PlayerController : MonoBehaviour
 		}
 	}
 
-	// 攻撃入力を描画と大砲へ振り分ける。
+	// 攻撃入力を自由描画と大砲へ振り分ける。
 	public void OnAttack(InputValue inputValue)
+	{
+		if (IsDrawPhase())
+		{
+			drawing.SetDrawButtonPressed(inputValue.isPressed);
+			return;
+		}
+
+		if (inputValue.isPressed)
+		{
+			cannon.TryAttack(identity.ControlledSide);
+		}
+	}
+
+	// Draw 中は現在の自由描画をクリアする。
+	public void OnCycleShape(InputValue inputValue)
+	{
+		if (inputValue.isPressed && IsDrawPhase())
+		{
+			drawing.ClearDrawing();
+		}
+	}
+
+	// Draw 中は描画を確定し、それ以外では発射中の弾を止める。
+	public void OnCrouch(InputValue inputValue)
 	{
 		if (!inputValue.isPressed)
 		{
@@ -192,29 +246,9 @@ public sealed class PlayerController : MonoBehaviour
 
 		if (IsDrawPhase())
 		{
-			if (GameManager.Instance != null && GameManager.Instance.TryConsumeShape(identity.ControlledSide))
-			{
-				drawing.PlaceStamp();
-			}
-			return;
+			drawing.ConfirmDrawing();
 		}
-
-		cannon.TryAttack(identity.ControlledSide);
-	}
-
-	// 図形切り替え入力を処理する。
-	public void OnCycleShape(InputValue inputValue)
-	{
-		if (inputValue.isPressed)
-		{
-			drawing.CycleShape();
-		}
-	}
-
-	// しゃがみ入力で発射中の弾を止める。
-	public void OnCrouch(InputValue inputValue)
-	{
-		if (inputValue.isPressed)
+		else
 		{
 			cannon.StopActiveProjectile();
 		}
@@ -229,8 +263,10 @@ public sealed class PlayerController : MonoBehaviour
 		drawing.ConfigureControlledSide(side);
 		RefreshBlockerPresentationState();
 	}
-	// ローカル入力スキームを設定する。
-	public void ConfigureLocalInput(MatchSide side, bool useGamepad) => identity.ConfigureLocalInput(side, useGamepad);
+	// 指定されたローカル入力デバイスを設定する。
+	public bool ConfigureLocalInput(string controlScheme, params InputDevice[] devices) => identity.ConfigureLocalInput(controlScheme, devices);
+	// 現在のローカル入力ペアリングを解除する。
+	public void ClearLocalInput() => identity.ClearLocalInput();
 	// 一定時間入力をロックする。
 	public void LockInput(float duration) => motor.LockInput(duration);
 	// ダッシュ再使用可否を初期化する。
@@ -242,12 +278,15 @@ public sealed class PlayerController : MonoBehaviour
 	{
 		transform.position = spawnPosition;
 		moveInput = Vector2.zero;
+		cannon.SetAimInput(0f);
 		drawing.SetMoveInput(Vector2.zero);
+		drawing.SetDrawButtonPressed(false);
 		motor.SetMoveInput(Vector2.zero);
 		dash.SetPreferredDirection(Vector2.zero);
 		motor.ResetForNextRound();
 		dash.ResetAvailability();
 		cannon.ResetForNextRound();
+		blockerRaceAttackCooldown?.ResetCooldown();
 		drawing.ResetForNextRound();
 		RefreshBlockerPresentationState();
 	}

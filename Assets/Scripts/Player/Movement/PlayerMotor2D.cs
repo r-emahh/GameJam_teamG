@@ -116,6 +116,7 @@ public sealed class PlayerMotor2D : MonoBehaviour
 		inputLockTimer = 0f;
 		SetMovementLocked(false);
 		Stop();
+		body.angularVelocity = 0f;
 	}
 
 	// 移動を完全にロックまたは解除する。

@@ -1,5 +1,6 @@
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 [DisallowMultipleComponent]
 // 試合情報をテキストへ反映する HUD ビュー。
@@ -25,17 +26,33 @@ public sealed class MatchHudView : MonoBehaviour
 	[SerializeField]
 	private TextMeshProUGUI launchText;
 
-	// 図形残数ラベルを表示する。
+	// 描画点数ラベルを表示する。
 	[SerializeField]
 	private TextMeshProUGUI shapeBudgetText;
 
-	// 図形ラベルを表示する。
+	// 描画状態と操作ラベルを表示する。
 	[SerializeField]
 	private TextMeshProUGUI shapeText;
 
 	// 大砲選択ラベルを表示する。
 	[SerializeField]
 	private TextMeshProUGUI cannonText;
+
+	// Place 中の発射パワー表示ルートを保持する。
+	[SerializeField]
+	private GameObject launchPowerRoot;
+
+	// Place 中の発射パワー数値を表示する。
+	[SerializeField]
+	private TextMeshProUGUI launchPowerText;
+
+	// Place 中の発射パワーゲージ充填部を表示する。
+	[SerializeField]
+	private Image launchPowerFill;
+
+	// Race 中の Blocker 妨害弾クールダウンを表示する。
+	[SerializeField]
+	private TextMeshProUGUI blockerCooldownText;
 
 	// 結果ラベルを表示する。
 	[SerializeField]
@@ -51,6 +68,10 @@ public sealed class MatchHudView : MonoBehaviour
 		TextMeshProUGUI shapeBudget,
 		TextMeshProUGUI shape,
 		TextMeshProUGUI cannon,
+		GameObject powerRoot,
+		TextMeshProUGUI powerText,
+		Image powerFill,
+		TextMeshProUGUI blockerCooldown,
 		TextMeshProUGUI result)
 	{
 		stateText = state;
@@ -61,6 +82,10 @@ public sealed class MatchHudView : MonoBehaviour
 		shapeBudgetText = shapeBudget;
 		shapeText = shape;
 		cannonText = cannon;
+		launchPowerRoot = powerRoot;
+		launchPowerText = powerText;
+		launchPowerFill = powerFill;
+		blockerCooldownText = blockerCooldown;
 		resultText = result;
 	}
 
@@ -103,22 +128,63 @@ public sealed class MatchHudView : MonoBehaviour
 		launchText.text = $"LAUNCHES: G {goalRunner} / B {blocker}";
 	}
 
-	// 図形残数を更新する。
-	public void SetShapeBudget(int goalRunner, int blocker)
+	// 自由描画の点数と確定状態を更新する。
+	public void SetDrawingStatus(
+		int goalRunnerPoints,
+		int goalRunnerMaxPoints,
+		bool goalRunnerConfirmed,
+		int blockerPoints,
+		int blockerMaxPoints,
+		bool blockerConfirmed)
 	{
-		shapeBudgetText.text = $"STAMPS: G {goalRunner} / B {blocker}";
-	}
-
-	// 図形表示を更新する。
-	public void SetDrawingShape(DrawingStampShape goalRunnerShape, DrawingStampShape blockerShape)
-	{
-		shapeText.text = $"SHAPE: G {FormatShape(goalRunnerShape)} / B {FormatShape(blockerShape)}";
+		shapeBudgetText.text = $"DRAW POINTS: G {goalRunnerPoints}/{goalRunnerMaxPoints} / B {blockerPoints}/{blockerMaxPoints}";
+		shapeText.text = $"DRAW: G {FormatDrawingState(goalRunnerConfirmed)} / B {FormatDrawingState(blockerConfirmed)}  |  ATTACK draw, X clear, B confirm";
 	}
 
 	// 大砲選択表示を更新する。
-	public void SetCannonSelection(int goalRunnerOrder, int blockerOrder)
+	public void SetCannonSelection(
+		int goalRunnerOrder,
+		float goalRunnerAngle,
+		int blockerOrder,
+		float blockerAngle,
+		MatchSide currentSide)
 	{
-		cannonText.text = $"CANNON: G {FormatSelection(goalRunnerOrder)} / B {FormatSelection(blockerOrder)}";
+		string goalRunnerTurn = currentSide == MatchSide.GoalRunner ? "*" : string.Empty;
+		string blockerTurn = currentSide == MatchSide.Blocker ? "*" : string.Empty;
+		cannonText.text = $"CANNON: {goalRunnerTurn}G {FormatSelection(goalRunnerOrder, goalRunnerAngle)} / {blockerTurn}B {FormatSelection(blockerOrder, blockerAngle)}  |  AIM RS/D-PAD or R/F";
+	}
+
+	// 現在手番プレイヤーの発射パワーだけを表示する。
+	public void SetLaunchPower(bool visible, MatchSide side, float normalizedPower, float power)
+	{
+		if (launchPowerRoot == null)
+		{
+			return;
+		}
+
+		launchPowerRoot.SetActive(visible);
+		if (!visible)
+		{
+			return;
+		}
+
+		string sideLabel = side == MatchSide.GoalRunner ? "GOAL RUNNER" : "BLOCKER";
+		launchPowerText.text = $"SHOT POWER ({sideLabel}): {power:0.0}  |  ATTACK fire";
+		launchPowerFill.fillAmount = Mathf.Clamp01(normalizedPower);
+	}
+
+	// Race 中の Blocker 妨害弾クールダウン表示を更新する。
+	public void SetBlockerRaceAttackCooldown(bool visible, bool isReady, float remaining, float duration)
+	{
+		if (!visible)
+		{
+			blockerCooldownText.text = "BLOCKER SHOT: -";
+			return;
+		}
+
+		blockerCooldownText.text = isReady
+			? "BLOCKER SHOT: READY"
+			: $"BLOCKER SHOT: {remaining:0.0}s / {duration:0.0}s";
 	}
 
 	// 結果表示を更新する。
@@ -142,27 +208,19 @@ public sealed class MatchHudView : MonoBehaviour
 		timerText.text = "TIMER: -";
 		roundText.text = "ROUND: -";
 		launchText.text = "LAUNCHES: -";
-		shapeBudgetText.text = "STAMPS: -";
-		shapeText.text = "SHAPE: -";
+		shapeBudgetText.text = "DRAW POINTS: -";
+		shapeText.text = "DRAW: -";
 		cannonText.text = "CANNON: -";
+		SetLaunchPower(false, MatchSide.GoalRunner, 0f, 0f);
+		blockerCooldownText.text = "BLOCKER SHOT: -";
 		resultText.text = "RESULT: -";
 	}
 
 	// 0-based 順序を見やすい表示へ変換する。
-	private static string FormatSelection(int order)
+	private static string FormatSelection(int order, float angle)
 	{
-		return order >= 0 ? (order + 1).ToString() : "-";
+		return order >= 0 ? $"{order + 1} ({angle:+0;-0;0} deg)" : "-";
 	}
 
-	// 図形名を短く表示する。
-	private static string FormatShape(DrawingStampShape shape)
-	{
-		return shape switch
-		{
-			DrawingStampShape.Square => "SQUARE",
-			DrawingStampShape.Circle => "CIRCLE",
-			DrawingStampShape.Triangle => "TRIANGLE",
-			_ => "UNKNOWN"
-		};
-	}
+	private static string FormatDrawingState(bool confirmed) => confirmed ? "CONFIRMED" : "EDITING";
 }

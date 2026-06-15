@@ -74,12 +74,23 @@ public sealed class MatchRoundResetCoordinator : MonoBehaviour
 		}
 	}
 
-	// 次ラウンド開始前に盤面を消去し、役割を反転して再配置する。
+	// 次ラウンドの表示通知前に盤面を消去し、役割を反転して再配置する。
 	private void HandleRoundAdvanced(int _)
 	{
 		ClearRuntimeBoardObjects();
+		ResetCannonAngles();
 		SwapPlayerSides();
 		ResetPlayersToSpawnPoints();
+	}
+
+	// 全大砲を Inspector で指定したラウンド開始角度へ戻す。
+	private static void ResetCannonAngles()
+	{
+		CannonMount[] mounts = Object.FindObjectsByType<CannonMount>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+		foreach (CannonMount mount in mounts)
+		{
+			mount?.ResetAngle();
+		}
 	}
 
 	// ラウンド単位で消したいランタイム生成物を破棄する。
@@ -90,6 +101,7 @@ public sealed class MatchRoundResetCoordinator : MonoBehaviour
 		{
 			if (runtimeObject != null)
 			{
+				runtimeObject.gameObject.SetActive(false);
 				Object.Destroy(runtimeObject.gameObject);
 			}
 		}

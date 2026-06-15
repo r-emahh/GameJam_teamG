@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.Users;
 
 [DisallowMultipleComponent]
 [RequireComponent(typeof(PlayerInput))]
@@ -28,10 +29,57 @@ public sealed class PlayerIdentity : MonoBehaviour
 		controlledSide = side;
 	}
 
-	// ローカルプレイヤーとして入力スキームを設定する。
-	public void ConfigureLocalInput(MatchSide side, bool useGamepad)
+	// 指定された物理デバイスだけをローカル入力として設定する。
+	public bool ConfigureLocalInput(string controlScheme, params InputDevice[] devices)
 	{
-		controlledSide = side;
+		if (!playerInput)
+		{
+			playerInput = GetComponent<PlayerInput>();
+		}
+
+		if (playerInput == null
+			|| !playerInput.isActiveAndEnabled
+			|| playerInput.actions == null
+			|| string.IsNullOrEmpty(controlScheme)
+			|| devices == null
+			|| devices.Length == 0)
+		{
+			ClearLocalInput();
+			return false;
+		}
+
+		playerInput.neverAutoSwitchControlSchemes = true;
+		for (int i = 0; i < devices.Length; i++)
+		{
+			if (devices[i] == null || !devices[i].added)
+			{
+				ClearLocalInput();
+				return false;
+			}
+		}
+
+		try
+		{
+			playerInput.SwitchCurrentControlScheme(controlScheme, devices);
+			playerInput.ActivateInput();
+			return true;
+		}
+		catch (System.ArgumentException exception)
+		{
+			Debug.LogWarning($"Failed to configure local input: {exception.Message}", this);
+		}
+		catch (System.InvalidOperationException exception)
+		{
+			Debug.LogWarning($"Failed to configure local input: {exception.Message}", this);
+		}
+
+		ClearLocalInput();
+		return false;
+	}
+
+	// 入力を停止し、現在のペアリングを解除する。
+	public void ClearLocalInput()
+	{
 		if (!playerInput)
 		{
 			playerInput = GetComponent<PlayerInput>();
@@ -43,15 +91,11 @@ public sealed class PlayerIdentity : MonoBehaviour
 		}
 
 		playerInput.neverAutoSwitchControlSchemes = true;
-		if (useGamepad && Gamepad.current != null)
+		playerInput.DeactivateInput();
+		InputUser user = playerInput.user;
+		if (user.valid)
 		{
-			playerInput.SwitchCurrentControlScheme("Gamepad", Gamepad.current);
-			return;
-		}
-
-		if (Keyboard.current != null && Mouse.current != null)
-		{
-			playerInput.SwitchCurrentControlScheme("Keyboard&Mouse", Keyboard.current, Mouse.current);
+			user.UnpairDevices();
 		}
 	}
 }

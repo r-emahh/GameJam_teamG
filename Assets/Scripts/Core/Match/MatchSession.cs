@@ -6,6 +6,8 @@ public sealed class MatchSession
 {
 	// 試合設定からフェーズ時間や弾数を取得する。
 	private readonly MatchConfiguration configuration;
+	// ラウンドごとの図形数を抽選する関数を保持する。
+	private readonly Func<int, int, int> randomRange;
 
 	// 現在のフェーズを保持する。
 	public MatchPhase Phase { get; private set; } = MatchPhase.Idle;
@@ -36,7 +38,7 @@ public sealed class MatchSession
 	public event Action<MatchSide> SideChanged;
 	// ラウンド変更を外部へ通知する。
 	public event Action<int> RoundChanged;
-	// 次ラウンドへ移る直前に外部へ通知する。
+	// 次ラウンド状態の確定後、表示向け通知の前に外部へ通知する。
 	public event Action<int> RoundAdvanced;
 	// タイマー変更を外部へ通知する。
 	public event Action<float, float> TimerChanged;
@@ -49,19 +51,21 @@ public sealed class MatchSession
 
 	// 設定を受け取り、試合進行に必要な値を保持する。
 	public MatchSession(MatchConfiguration configuration)
+		: this(configuration, UnityEngine.Random.Range)
+	{
+	}
+
+	// テストから抽選結果を制御できる試合セッションを作る。
+	public MatchSession(MatchConfiguration configuration, Func<int, int, int> randomRange)
 	{
 		this.configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+		this.randomRange = randomRange ?? throw new ArgumentNullException(nameof(randomRange));
 	}
 
 	// 新しい試合を開始し、初期ラウンドと初期フェーズへ入る。
 	public void Begin()
 	{
-		Round = 1;
-		Result = MatchResult.None;
-		SetSide(MatchSide.GoalRunner, true);
-		SetPhase(MatchPhase.Draw);
-		AssignShapeBudgets();
-		RoundChanged?.Invoke(Round);
+		StartRound(1, false);
 	}
 
 	// フレームごとの経過時間を反映し、必要なら次のフェーズへ進める。
@@ -118,12 +122,20 @@ public sealed class MatchSession
 		return true;
 	}
 
-	// ゴール到達を記録し、結果フェーズへ遷移する。
-	public void MarkGoalReached()
+	// Race 中に Goal Runner が到達した場合だけ、結果フェーズへ遷移する。
+	public bool TryMarkGoalReached(MatchSide side)
 	{
+		if (Phase != MatchPhase.Race
+			|| side != MatchSide.GoalRunner
+			|| Result != MatchResult.None)
+		{
+			return false;
+		}
+
 		Result = MatchResult.GoalRunnerWin;
 		ResultChanged?.Invoke(Result);
 		SetPhase(MatchPhase.Result);
+		return true;
 	}
 
 	// 制限時間切れとして結果を確定する。
@@ -147,8 +159,13 @@ public sealed class MatchSession
 		BlockerLaunches = 0;
 		GoalRunnerShapes = 0;
 		BlockerShapes = 0;
+		PhaseChanged?.Invoke(Phase);
+		SideChanged?.Invoke(Side);
+		RoundChanged?.Invoke(Round);
+		ResultChanged?.Invoke(Result);
 		LaunchBudgetChanged?.Invoke(0, 0);
 		ShapeBudgetChanged?.Invoke(0, 0);
+		TimerChanged?.Invoke(0f, 0f);
 	}
 
 	// 指定陣営の図形を1減らし、必要なら使えなくする。
@@ -196,29 +213,17 @@ public sealed class MatchSession
 		}
 	}
 
-	// 次ラウンドへ進み、役割を初期状態へ戻す。
+	// 次ラウンドへ進み、ラウンド開始状態を作り直す。
 	private void AdvanceRound()
 	{
-		Round++;
-		Result = MatchResult.None;
-		RoundChanged?.Invoke(Round);
-		ResultChanged?.Invoke(Result);
-		SetSide(MatchSide.GoalRunner, true);
-		RoundAdvanced?.Invoke(Round);
-		SetPhase(MatchPhase.Draw);
+		StartRound(Round + 1, true);
 	}
 
 	// フェーズを確定し、タイマーと必要な初期値を更新する。
 	private void SetPhase(MatchPhase phase)
 	{
 		Phase = phase;
-		if (Phase == MatchPhase.Place)
-		{
-			GoalRunnerLaunches = configuration.GoalRunnerLaunchCount;
-			BlockerLaunches = configuration.BlockerLaunchCount;
-			LaunchBudgetChanged?.Invoke(GoalRunnerLaunches, BlockerLaunches);
-		}
-		else if (Phase == MatchPhase.Race)
+		if (Phase == MatchPhase.Race)
 		{
 			SetSide(MatchSide.GoalRunner);
 		}
@@ -232,15 +237,41 @@ public sealed class MatchSession
 	// ラウンド開始時に図形配布数をランダム決定する。
 	private void AssignShapeBudgets()
 	{
-		GoalRunnerShapes = UnityEngine.Random.Range(configuration.MinDrawingStampCount, configuration.MaxDrawingStampCount + 1);
-		BlockerShapes = UnityEngine.Random.Range(configuration.MinBlockerStampCount, configuration.MaxBlockerStampCount + 1);
+		GoalRunnerShapes = randomRange(configuration.MinDrawingStampCount, configuration.MaxDrawingStampCount + 1);
+		BlockerShapes = randomRange(configuration.MinBlockerStampCount, configuration.MaxBlockerStampCount + 1);
+	}
+
+	// ラウンド状態をすべて確定してから、リセット処理と表示更新を順番に通知する。
+	private void StartRound(int round, bool notifyRoundAdvanced)
+	{
+		Round = round;
+		Result = MatchResult.None;
+		Side = MatchSide.GoalRunner;
+		GoalRunnerLaunches = configuration.GoalRunnerLaunchCount;
+		BlockerLaunches = configuration.BlockerLaunchCount;
+		AssignShapeBudgets();
+		Phase = MatchPhase.Draw;
+		PhaseDuration = configuration.GetDuration(Phase);
+		TimeRemaining = PhaseDuration;
+
+		if (notifyRoundAdvanced)
+		{
+			RoundAdvanced?.Invoke(Round);
+		}
+
+		RoundChanged?.Invoke(Round);
+		ResultChanged?.Invoke(Result);
+		SideChanged?.Invoke(Side);
+		LaunchBudgetChanged?.Invoke(GoalRunnerLaunches, BlockerLaunches);
 		ShapeBudgetChanged?.Invoke(GoalRunnerShapes, BlockerShapes);
+		PhaseChanged?.Invoke(Phase);
+		TimerChanged?.Invoke(TimeRemaining, PhaseDuration);
 	}
 
 	// 現在の操作陣営を変更し、必要なら通知する。
-	private void SetSide(MatchSide side, bool forceNotify = false)
+	private void SetSide(MatchSide side)
 	{
-		if (Side == side && !forceNotify)
+		if (Side == side)
 		{
 			return;
 		}

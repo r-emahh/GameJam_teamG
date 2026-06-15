@@ -51,7 +51,7 @@ public sealed class GameManager : MonoBehaviour
 	public event Action<MatchSide> OnMatchSideChanged;
 	// ラウンド変更を購読側へ通知する。
 	public event Action<int> OnRoundChanged;
-	// 次ラウンドへの切り替えを購読側へ通知する。
+	// 次ラウンド状態の確定後、表示向け通知の前に購読側へ通知する。
 	public event Action<int> OnRoundAdvanced;
 	// タイマー更新を購読側へ通知する。
 	public event Action<float, float> OnPhaseTimerChanged;
@@ -150,8 +150,11 @@ public sealed class GameManager : MonoBehaviour
 		}
 	}
 
-	// ゴール到達を試合ロジックへ通知する。
-	public void MarkGoalReached() => session.MarkGoalReached();
+	// ゲーム進行中のゴール到達を試合ロジックへ通知する。
+	public bool TryMarkGoalReached(MatchSide side)
+	{
+		return currentState == GameState.Game && session.TryMarkGoalReached(side);
+	}
 	// 時間切れを試合ロジックへ通知する。
 	public void MarkTimeUp() => session.MarkTimeUp();
 	// 指定陣営の発射回数を消費する。
@@ -164,7 +167,7 @@ public sealed class GameManager : MonoBehaviour
 	// 該当シーンに入ったとき、必要なら試合を再開する。
 	private void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
 	{
-		if ((scene.name == "Game" || scene.name == "Rema") && currentState == GameState.Game && !session.IsRunning)
+		if (SceneCatalog.IsMatch(scene.name) && currentState == GameState.Game && !session.IsRunning)
 		{
 			session.Begin();
 		}
