@@ -13,6 +13,8 @@ public sealed class StageRuntimeBuilder : MonoBehaviour
 	private const string StageGridName = "StageGrid";
 	// ランタイム生成する Tilemap の名前。
 	private const string StageTilemapName = "StageTilemap";
+	// 床コライダー群のルート名。
+	private const string StageGroundCollisionRootName = "StageGroundCollision";
 	// ゴールゾーンの名前。
 	private const string GoalZoneName = "GoalZone";
 	// 画面上中央に置く唯一の大砲名。
@@ -81,7 +83,9 @@ public sealed class StageRuntimeBuilder : MonoBehaviour
 	public void Build()
 	{
 		RemoveLegacyDrawZone();
-		Rect worldBounds = EnsureTilemapStage();
+		TileRect[] solidRectangles = BuildSolidRectangles();
+		Rect worldBounds = EnsureTilemapStage(solidRectangles);
+		EnsureGroundCollisionStage(solidRectangles);
 		EnsureStageSurface(worldBounds);
 		EnsureGoalZone(worldBounds);
 		CreateBoundaryIfNeeded("StageTop", new Vector3(worldBounds.center.x, worldBounds.yMax + 0.5f, 0f), new Vector2(worldBounds.width, 0.18f));
@@ -90,6 +94,7 @@ public sealed class StageRuntimeBuilder : MonoBehaviour
 		CreateSpawnPointIfNeeded(PlayerSpawnCoordinator.GoalRunnerSpawnName, GoalRunnerSpawnPosition);
 		CreateSpawnPointIfNeeded(PlayerSpawnCoordinator.BlockerSpawnName, BlockerSpawnPosition);
 		EnsureCameraScroll(worldBounds);
+		Physics2D.SyncTransforms();
 	}
 
 	// ステージ全体を描画可能領域として用意する。
@@ -105,7 +110,7 @@ public sealed class StageRuntimeBuilder : MonoBehaviour
 	}
 
 	// Tilemap で構成した地形を生成し、ワールド範囲を返す。
-	private Rect EnsureTilemapStage()
+	private Rect EnsureTilemapStage(TileRect[] solidRectangles)
 	{
 		GameObject gridObject = FindOrCreate(StageGridName);
 		Grid grid = EnsureComponent<Grid>(gridObject);
@@ -121,18 +126,14 @@ public sealed class StageRuntimeBuilder : MonoBehaviour
 		GameObject tilemapObject = FindOrCreate(StageTilemapName);
 		Tilemap tilemap = EnsureComponent<Tilemap>(tilemapObject);
 		TilemapRenderer renderer = EnsureComponent<TilemapRenderer>(tilemapObject);
-		TilemapCollider2D tilemapCollider = EnsureComponent<TilemapCollider2D>(tilemapObject);
-		CompositeCollider2D compositeCollider = EnsureComponent<CompositeCollider2D>(tilemapObject);
 		Rigidbody2D body = EnsureComponent<Rigidbody2D>(tilemapObject);
 
-		if (!tilemap || !renderer || !tilemapCollider || !compositeCollider || !body)
+		if (!tilemap || !renderer || !body)
 		{
 			UnityEngine.Object.Destroy(tilemapObject);
 			tilemapObject = new GameObject(StageTilemapName);
 			tilemap = tilemapObject.AddComponent<Tilemap>();
 			renderer = tilemapObject.AddComponent<TilemapRenderer>();
-			tilemapCollider = tilemapObject.AddComponent<TilemapCollider2D>();
-			compositeCollider = tilemapObject.AddComponent<CompositeCollider2D>();
 			body = tilemapObject.AddComponent<Rigidbody2D>();
 		}
 
@@ -143,11 +144,9 @@ public sealed class StageRuntimeBuilder : MonoBehaviour
 		renderer.sortingOrder = -5;
 		body.bodyType = RigidbodyType2D.Static;
 		body.simulated = true;
-		tilemapCollider.usedByComposite = true;
-		compositeCollider.geometryType = CompositeCollider2D.GeometryType.Polygons;
 
 		tilemap.ClearAllTiles();
-		FillSolidTiles(tilemap);
+		FillSolidTiles(tilemap, solidRectangles);
 		tilemap.CompressBounds();
 
 		Rect worldBounds = new Rect(
@@ -157,6 +156,32 @@ public sealed class StageRuntimeBuilder : MonoBehaviour
 			StageMapHeight);
 
 		return worldBounds;
+	}
+
+	// 床コライダーを生成し、物理衝突を確実にする。
+	private void EnsureGroundCollisionStage(TileRect[] solidRectangles)
+	{
+		GameObject collisionRoot = GameObject.Find(StageGroundCollisionRootName);
+		if (collisionRoot != null)
+		{
+			UnityEngine.Object.Destroy(collisionRoot);
+		}
+
+		collisionRoot = new GameObject(StageGroundCollisionRootName);
+		collisionRoot.layer = GetGroundLayer();
+		collisionRoot.transform.SetParent(GameObject.Find(StageTilemapName)?.transform, false);
+
+		for (int i = 0; i < solidRectangles.Length; i++)
+		{
+			TileRect rect = solidRectangles[i];
+			GameObject colliderObject = new GameObject($"GroundCollider_{i}");
+			colliderObject.layer = GetGroundLayer();
+			colliderObject.transform.SetParent(collisionRoot.transform, false);
+			colliderObject.transform.localPosition = new Vector3(rect.X + rect.Width * 0.5f, rect.Y + rect.Height * 0.5f, 0f);
+			BoxCollider2D collider = colliderObject.AddComponent<BoxCollider2D>();
+			collider.size = new Vector2(rect.Width, rect.Height);
+			collider.isTrigger = false;
+		}
 	}
 
 	// コンポーネントが存在すれば返し、無ければ追加を試みる。
@@ -257,12 +282,10 @@ public sealed class StageRuntimeBuilder : MonoBehaviour
 	}
 
 	// Tilemap に地形を塗る。
-	private static void FillSolidTiles(Tilemap tilemap)
+	private static void FillSolidTiles(Tilemap tilemap, TileRect[] solidRectangles)
 	{
 		Tile solidTile = GetOrCreateSolidTile();
 		Tile accentTile = GetOrCreateAccentTile();
-
-		TileRect[] solidRectangles = BuildSolidRectangles();
 		for (int i = 0; i < solidRectangles.Length; i++)
 		{
 			TileRect rect = solidRectangles[i];

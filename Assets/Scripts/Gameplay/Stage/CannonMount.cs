@@ -4,6 +4,9 @@ using UnityEngine;
 // 大砲の設置位置と選択順を表す。
 public sealed class CannonMount : MonoBehaviour
 {
+	private const float FullRotationDegrees = 360f;
+	private const float HalfRotationDegrees = 180f;
+
 	// カメラ上端から少し内側に寄せる量を保持する。
 	[SerializeField]
 	private Vector2 edgeInset = new Vector2(0.7f, 0.7f);
@@ -18,11 +21,11 @@ public sealed class CannonMount : MonoBehaviour
 
 	// ステージ中央方向から許可する最小相対角度。
 	[SerializeField]
-	private float minimumAngle = -60f;
+	private float minimumAngle = -180f;
 
 	// ステージ中央方向から許可する最大相対角度。
 	[SerializeField]
-	private float maximumAngle = 60f;
+	private float maximumAngle = 180f;
 
 	// ラウンド開始時の相対角度。
 	[SerializeField]
@@ -50,7 +53,7 @@ public sealed class CannonMount : MonoBehaviour
 	private void OnValidate()
 	{
 		NormalizeAngleSettings();
-		currentAngle = Mathf.Clamp(currentAngle, minimumAngle, maximumAngle);
+		currentAngle = ClampOrNormalizeAngle(currentAngle);
 		ApplyRotation();
 	}
 
@@ -89,7 +92,7 @@ public sealed class CannonMount : MonoBehaviour
 	public void SetAngle(float angle)
 	{
 		NormalizeAngleSettings();
-		currentAngle = Mathf.Clamp(angle, minimumAngle, maximumAngle);
+		currentAngle = ClampOrNormalizeAngle(angle);
 		ApplyRotation();
 	}
 
@@ -117,7 +120,7 @@ public sealed class CannonMount : MonoBehaviour
 	public void ResetAngle()
 	{
 		NormalizeAngleSettings();
-		currentAngle = Mathf.Clamp(initialAngle, minimumAngle, maximumAngle);
+		currentAngle = ClampOrNormalizeAngle(initialAngle);
 		ApplyRotation();
 	}
 
@@ -183,7 +186,7 @@ public sealed class CannonMount : MonoBehaviour
 		return targetCamera != null ? targetCamera.transform.position : Vector3.zero;
 	}
 
-	// 最小・最大角度の逆転を補正し、初期角度を範囲内へ収める。
+	// 最小・最大角度の逆転を補正し、初期角度を有効な角度へ収める。
 	private void NormalizeAngleSettings()
 	{
 		if (minimumAngle > maximumAngle)
@@ -191,6 +194,23 @@ public sealed class CannonMount : MonoBehaviour
 			(minimumAngle, maximumAngle) = (maximumAngle, minimumAngle);
 		}
 
-		initialAngle = Mathf.Clamp(initialAngle, minimumAngle, maximumAngle);
+		initialAngle = ClampOrNormalizeAngle(initialAngle);
+	}
+
+	private float ClampOrNormalizeAngle(float angle)
+	{
+		return AllowsFullRotation()
+			? NormalizeSignedAngle(angle)
+			: Mathf.Clamp(angle, minimumAngle, maximumAngle);
+	}
+
+	private bool AllowsFullRotation()
+	{
+		return maximumAngle - minimumAngle >= FullRotationDegrees;
+	}
+
+	private static float NormalizeSignedAngle(float angle)
+	{
+		return Mathf.Repeat(angle + HalfRotationDegrees, FullRotationDegrees) - HalfRotationDegrees;
 	}
 }
