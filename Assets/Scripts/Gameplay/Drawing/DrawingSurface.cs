@@ -27,12 +27,6 @@ public sealed class DrawingSurface : MonoBehaviour
 	[SerializeField, Range(0.1f, 1f)]
 	private float drawingWidthScale = 0.8f;
 
-	[SerializeField]
-	private Color playerOneColor = new Color(0.15f, 0.95f, 1f, 0.95f);
-
-	[SerializeField]
-	private Color playerTwoColor = new Color(1f, 0.35f, 0.25f, 0.95f);
-
 	[SerializeField, Min(0f)]
 	private float colliderSimplificationTolerance = 0.04f;
 
@@ -117,7 +111,9 @@ public sealed class DrawingSurface : MonoBehaviour
 
 	public Color GetPlayerColor(DrawingPlayerSlot slot)
 	{
-		return slot == DrawingPlayerSlot.PlayerOne ? playerOneColor : playerTwoColor;
+		Color color = PlayerVisualPalette.GetPlayerColor(slot);
+		color.a = 0.95f;
+		return color;
 	}
 
 	// 確定済みの原本データから、発射用オブジェクトへ同じ形状とCollider構成を複製する。

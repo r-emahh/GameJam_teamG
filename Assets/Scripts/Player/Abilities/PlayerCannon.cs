@@ -43,6 +43,10 @@ public sealed class PlayerCannon : MonoBehaviour
 	[SerializeField, Min(0f)]
 	private float launchPowerSweepSpeed = 10f;
 
+	// 発射直後に大砲や上端境界へ重ならないよう、砲弾後端から追加で離す距離。
+	[SerializeField, Min(0f)]
+	private float launchClearance = 0.6f;
+
 	// プレイヤーの陣営を取得する。
 	private PlayerIdentity playerIdentity;
 	// この発射者がDrawフェーズで確定した描画を保持する。
@@ -55,10 +59,14 @@ public sealed class PlayerCannon : MonoBehaviour
 	private int selectedIndex;
 	// 発射中の弾を保持する。
 	private CannonProjectile activeProjectile;
+	// 発射中の弾が消費するPlace発射回数の陣営を保持する。
+	private MatchSide activeProjectileSide = MatchSide.GoalRunner;
 	// Race 中の Blocker 妨害弾クールダウンを管理する。
 	private BlockerRaceAttackCooldown blockerRaceAttackCooldown;
 	// 現在の角度調整入力を保持する。
 	private float aimInput;
+	// 右スティックで指定されたワールド方向を保持する。
+	private Vector2 aimDirectionInput;
 	// 発射パワー往復開始からの経過量を保持する。
 	private float launchPowerTravel;
 	// 現在の発射パワーを保持する。
@@ -76,6 +84,8 @@ public sealed class PlayerCannon : MonoBehaviour
 	public float NormalizedLaunchPower => Mathf.InverseLerp(minimumLaunchPower, maximumLaunchPower, currentLaunchPower);
 	// 現在このプレイヤーが発射準備中かを返す。
 	public bool IsPreparingLaunch => CanControlCannon() && activeProjectile == null;
+	// このプレイヤーの停止入力が対象とする飛翔中の弾を返す。
+	public CannonProjectile ActiveProjectile => activeProjectile;
 
 	// 同期用のプレイヤー情報とマーカーを初期化する。
 	private void Awake()
@@ -110,13 +120,27 @@ public sealed class PlayerCannon : MonoBehaviour
 			TickLaunchPower(Time.deltaTime);
 		}
 
-		if (!CanControlCannon() || Mathf.Abs(aimInput) < aimDeadZone)
+		if (!CanControlCannon())
 		{
 			return;
 		}
 
 		CannonMount selectedMount = GetSelectedMount();
-		selectedMount?.AdjustAngle(aimInput * aimSpeed * Time.deltaTime);
+		if (selectedMount == null)
+		{
+			return;
+		}
+
+		if (aimDirectionInput.sqrMagnitude >= aimDeadZone * aimDeadZone)
+		{
+			selectedMount.SetWorldDirection(aimDirectionInput);
+			return;
+		}
+
+		if (Mathf.Abs(aimInput) >= aimDeadZone)
+		{
+			selectedMount.AdjustAngle(aimInput * aimSpeed * Time.deltaTime);
+		}
 	}
 
 	// 選択中表示を毎フレーム同期する。
@@ -164,6 +188,20 @@ public sealed class PlayerCannon : MonoBehaviour
 	public void SetAimInput(float value)
 	{
 		aimInput = Mathf.Clamp(value, -1f, 1f);
+		if (!Mathf.Approximately(aimInput, 0f))
+		{
+			aimDirectionInput = Vector2.zero;
+		}
+	}
+
+	// 右スティックの向きを大砲の発射方向として受け取る。
+	public void SetAimDirection(Vector2 direction)
+	{
+		aimDirectionInput = direction.sqrMagnitude > 1f ? direction.normalized : direction;
+		if (aimDirectionInput.sqrMagnitude >= aimDeadZone * aimDeadZone)
+		{
+			aimInput = 0f;
+		}
 	}
 
 	// 現在の試合状態に応じて攻撃を試みる。
@@ -194,20 +232,26 @@ public sealed class PlayerCannon : MonoBehaviour
 	public void StopActiveProjectile()
 	{
 		if (GameManager.Instance != null
-			&& GameManager.Instance.CurrentPhase == MatchPhase.Place
-			&& !CanControlCannon())
+			&& (GameManager.currentState != GameState.Game
+				|| GameManager.Instance.CurrentPhase != MatchPhase.Place))
 		{
 			return;
 		}
 
-		activeProjectile?.StopProjectile();
+		activeProjectile?.TryStopProjectile(this);
 	}
 
 	// 次ラウンドに向けて選択状態と発射中オブジェクト参照を初期化する。
 	public void ResetForNextRound()
 	{
-		StopActiveProjectile();
+		if (activeProjectile != null)
+		{
+			Destroy(activeProjectile.gameObject);
+			activeProjectile = null;
+		}
+
 		aimInput = 0f;
+		aimDirectionInput = Vector2.zero;
 		selectedIndex = 0;
 		wasPreparingLaunch = false;
 		ResetLaunchPower();
@@ -220,6 +264,26 @@ public sealed class PlayerCannon : MonoBehaviour
 		{
 			activeProjectile = null;
 		}
+	}
+
+	// 描画弾が停止して設置物になった時点で発射回数を消費する。
+	public void HandleProjectileStopped(CannonProjectile projectile)
+	{
+		if (activeProjectile != projectile)
+		{
+			return;
+		}
+
+		MatchSide consumedSide = activeProjectileSide;
+		activeProjectile = null;
+		if (GameManager.Instance != null
+			&& GameManager.currentState == GameState.Game
+			&& GameManager.Instance.CurrentPhase == MatchPhase.Place)
+		{
+			GameManager.Instance.TryConsumeLaunch(consumedSide);
+		}
+
+		SyncSelectionVisual();
 	}
 
 	// 大砲を選択できる局面かを判定する。
@@ -259,6 +323,11 @@ public sealed class PlayerCannon : MonoBehaviour
 			return;
 		}
 
+		if (!isStunProjectile && !HasLaunchRemaining(side))
+		{
+			return;
+		}
+
 		selectedIndex = WrapIndex(selectedIndex, cannonMounts.Count);
 		CannonMount mount = cannonMounts[selectedIndex];
 		float adoptedLaunchPower = currentLaunchPower;
@@ -272,21 +341,33 @@ public sealed class PlayerCannon : MonoBehaviour
 			return;
 		}
 
-		if (GameManager.Instance.CurrentPhase == MatchPhase.Place && !GameManager.Instance.TryConsumeLaunch(side))
-		{
-			Destroy(projectile.gameObject);
-			return;
-		}
+		projectile.transform.position = mount.transform.position
+			+ mount.transform.right * projectile.GetLaunchClearanceDistance(launchClearance);
 
 		activeProjectile = projectile;
+		activeProjectileSide = side;
 		if (activeProjectile.GetComponent<RuntimeRoundObject>() == null)
 		{
 			activeProjectile.gameObject.AddComponent<RuntimeRoundObject>();
 		}
 
 		activeProjectile.Initialize(this, isStunProjectile, adoptedLaunchPower);
+		AudioManager.PlayCannonFire();
 		ResetLaunchPower();
 		SyncSelectionVisual();
+	}
+
+	// 発射可能回数が残っているかを、発射前に確認する。
+	private static bool HasLaunchRemaining(MatchSide side)
+	{
+		if (GameManager.Instance == null || GameManager.Instance.CurrentPhase != MatchPhase.Place)
+		{
+			return true;
+		}
+
+		return side == MatchSide.GoalRunner
+			? GameManager.Instance.GoalRunnerLaunchesRemaining > 0
+			: GameManager.Instance.BlockerLaunchesRemaining > 0;
 	}
 
 	// 発射パワーを最小値と最大値の間で往復させる。
@@ -392,7 +473,6 @@ public sealed class PlayerCannon : MonoBehaviour
 		}
 
 		selectionMarker = new GameObject($"{name}_SelectionMarker");
-		selectionMarker.AddComponent<RuntimeRoundObject>();
 		selectionMarker.transform.SetParent(null, true);
 		selectionMarkerRenderer = selectionMarker.AddComponent<SpriteRenderer>();
 		selectionMarkerRenderer.sprite = RuntimeSpriteFactory.UnitSquare;

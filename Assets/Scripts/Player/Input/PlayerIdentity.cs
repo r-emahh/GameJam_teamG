@@ -7,6 +7,8 @@ using UnityEngine.InputSystem.Users;
 // プレイヤーの陣営とローカル入力スキームを管理する。
 public sealed class PlayerIdentity : MonoBehaviour
 {
+	private const string GameplayActionMap = "Player";
+
 	// Inspector から初期陣営を設定できる。
 	[SerializeField]
 	private MatchSide controlledSide = MatchSide.GoalRunner;
@@ -61,7 +63,13 @@ public sealed class PlayerIdentity : MonoBehaviour
 		try
 		{
 			playerInput.SwitchCurrentControlScheme(controlScheme, devices);
+			playerInput.notificationBehavior = PlayerNotifications.InvokeCSharpEvents;
 			playerInput.ActivateInput();
+			string actionMapName = !string.IsNullOrEmpty(playerInput.defaultActionMap)
+				? playerInput.defaultActionMap
+				: GameplayActionMap;
+			playerInput.SwitchCurrentActionMap(actionMapName);
+			playerInput.currentActionMap?.Enable();
 			return true;
 		}
 		catch (System.ArgumentException exception)

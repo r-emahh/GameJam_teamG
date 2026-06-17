@@ -67,4 +67,29 @@ public sealed class CannonMountTests
 			Object.DestroyImmediate(centerObject);
 		}
 	}
+
+	[Test]
+	public void SetWorldDirection_UsesRightStickDirectionRelativeToStageCenter()
+	{
+		GameObject cannonObject = new GameObject(nameof(SetWorldDirection_UsesRightStickDirectionRelativeToStageCenter));
+		GameObject centerObject = new GameObject("StageCenter");
+		try
+		{
+			cannonObject.transform.position = new Vector3(0f, 5f, 0f);
+			centerObject.transform.position = Vector3.zero;
+			CannonMount mount = cannonObject.AddComponent<CannonMount>();
+			mount.ConfigureStageCenter(centerObject.transform);
+			mount.ConfigureAim(-60f, 60f, 0f);
+
+			mount.SetWorldDirection(new Vector2(1f, -1f));
+
+			Assert.That(mount.CurrentAngle, Is.EqualTo(45f).Within(0.001f));
+			Assert.That(Mathf.DeltaAngle(cannonObject.transform.eulerAngles.z, 315f), Is.EqualTo(0f).Within(0.001f));
+		}
+		finally
+		{
+			Object.DestroyImmediate(cannonObject);
+			Object.DestroyImmediate(centerObject);
+		}
+	}
 }

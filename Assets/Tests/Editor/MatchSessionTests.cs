@@ -126,6 +126,26 @@ public sealed class MatchSessionTests
 	}
 
 	[Test]
+	public void SetPhaseTimerPaused_StopsAndResumesPhaseCountdown()
+	{
+		MatchSession session = CreateSession(CreateConfiguration(drawDuration: 10f));
+		session.Begin();
+
+		session.Tick(2f);
+		Assert.That(session.TimeRemaining, Is.EqualTo(8f));
+
+		session.SetPhaseTimerPaused(true);
+		session.Tick(3f);
+		Assert.That(session.TimeRemaining, Is.EqualTo(8f));
+		Assert.That(session.IsPhaseTimerPaused, Is.True);
+
+		session.SetPhaseTimerPaused(false);
+		session.Tick(1.5f);
+		Assert.That(session.TimeRemaining, Is.EqualTo(6.5f));
+		Assert.That(session.IsPhaseTimerPaused, Is.False);
+	}
+
+	[Test]
 	public void ResultExpiry_StartsNextRoundWithFreshState()
 	{
 		MatchConfiguration configuration = CreateConfiguration(
@@ -149,13 +169,31 @@ public sealed class MatchSessionTests
 	}
 
 	[Test]
+	public void FinalRoundExpiry_DoesNotStartRoundThree()
+	{
+		MatchSession session = CreateSession();
+		session.Begin();
+		AdvanceToRace(session);
+		Assert.That(session.TryMarkGoalReached(MatchSide.GoalRunner), Is.True);
+		ExpireCurrentPhase(session);
+		AdvanceToRace(session);
+		session.MarkTimeUp();
+
+		ExpireCurrentPhase(session);
+
+		Assert.That(session.Round, Is.EqualTo(2));
+		Assert.That(session.Phase, Is.EqualTo(MatchPhase.Result));
+		Assert.That(session.IsRunning, Is.False);
+		Assert.That(session.IsMatchComplete, Is.True);
+	}
+
+	[Test]
 	public void MultipleRounds_ReinitializeBudgetsAndRoundState()
 	{
 		Queue<int> shapeRolls = new Queue<int>(new[]
 		{
 			3, 2,
-			6, 5,
-			4, 3
+			6, 5
 		});
 		MatchConfiguration configuration = CreateConfiguration();
 		MatchSession session = new MatchSession(configuration, (min, max) =>
@@ -182,7 +220,6 @@ public sealed class MatchSessionTests
 		session.MarkTimeUp();
 		ExpireCurrentPhase(session);
 
-		AssertRoundStartState(session, configuration, 3, 4, 3);
 		Assert.That(shapeRolls, Is.Empty);
 		Assert.That(shapeNotifications, Is.EqualTo(new[]
 		{
@@ -190,9 +227,10 @@ public sealed class MatchSessionTests
 			(2, 2),
 			(2, 1),
 			(6, 5),
-			(5, 5),
-			(4, 3)
+			(5, 5)
 		}));
+		Assert.That(session.Round, Is.EqualTo(2));
+		Assert.That(session.IsMatchComplete, Is.True);
 	}
 
 	[Test, Timeout(1000)]
@@ -206,7 +244,7 @@ public sealed class MatchSessionTests
 		MatchSession session = CreateSession(configuration);
 		session.Begin();
 
-		for (int expectedRound = 1; expectedRound <= 100; expectedRound++)
+		for (int expectedRound = 1; expectedRound <= 2; expectedRound++)
 		{
 			Assert.That(session.Round, Is.EqualTo(expectedRound));
 			AssertPhase(session, MatchPhase.Draw, 0f, 0f);
@@ -220,12 +258,71 @@ public sealed class MatchSessionTests
 			session.Tick(0f);
 		}
 
-		AssertRoundStartState(
-			session,
-			configuration,
-			101,
-			configuration.MinDrawingStampCount,
-			configuration.MinBlockerStampCount);
+		Assert.That(session.Round, Is.EqualTo(2));
+		Assert.That(session.Phase, Is.EqualTo(MatchPhase.Result));
+		Assert.That(session.IsRunning, Is.False);
+		Assert.That(session.IsMatchComplete, Is.True);
+	}
+
+	[Test]
+	public void ScoreSummary_RecordsGoalSuccessTimePerPlayer()
+	{
+		MatchSession session = CreateSession(CreateConfiguration(
+			drawDuration: 0f,
+			placeDuration: 0f,
+			raceDuration: 10f,
+			resultDuration: 0f));
+		session.Begin();
+		AdvanceToRace(session);
+		session.Tick(3.5f);
+		Assert.That(session.TryMarkGoalReached(MatchSide.GoalRunner), Is.True);
+
+		MatchScoreSummary roundOneSummary = session.ScoreSummary;
+		Assert.That(roundOneSummary.Player1AttemptRecorded, Is.True);
+		Assert.That(roundOneSummary.Player1GoalSucceeded, Is.True);
+		Assert.That(roundOneSummary.Player1GoalTimeSeconds, Is.EqualTo(3.5f).Within(0.001f));
+		Assert.That(roundOneSummary.Player1RoundWins, Is.EqualTo(1));
+		Assert.That(roundOneSummary.Player2AttemptRecorded, Is.False);
+
+		ExpireCurrentPhase(session);
+		AdvanceToRace(session);
+		session.Tick(4.25f);
+		Assert.That(session.TryMarkGoalReached(MatchSide.GoalRunner), Is.True);
+
+		MatchScoreSummary finalSummary = session.ScoreSummary;
+		Assert.That(finalSummary.Player2AttemptRecorded, Is.True);
+		Assert.That(finalSummary.Player2GoalSucceeded, Is.True);
+		Assert.That(finalSummary.Player2GoalTimeSeconds, Is.EqualTo(4.25f).Within(0.001f));
+		Assert.That(finalSummary.IsMatchComplete, Is.True);
+		Assert.That(finalSummary.FinalWinner, Is.EqualTo(MatchWinner.Player1));
+	}
+
+	[Test]
+	public void ScoreSummary_WhenBothPlayersFail_MatchIsDraw()
+	{
+		MatchSession session = CreateSession(CreateConfiguration(
+			drawDuration: 0f,
+			placeDuration: 0f,
+			raceDuration: 0f,
+			resultDuration: 0f));
+		session.Begin();
+
+		for (int i = 0; i < 2; i++)
+		{
+			Assert.That(session.Phase, Is.EqualTo(MatchPhase.Draw));
+			session.Tick(0f);
+			Assert.That(session.Phase, Is.EqualTo(MatchPhase.Place));
+			session.Tick(0f);
+			Assert.That(session.Phase, Is.EqualTo(MatchPhase.Race));
+			session.Tick(0f);
+			Assert.That(session.Phase, Is.EqualTo(MatchPhase.Result));
+			session.Tick(0f);
+		}
+
+		Assert.That(session.ScoreSummary.IsMatchComplete, Is.True);
+		Assert.That(session.ScoreSummary.FinalWinner, Is.EqualTo(MatchWinner.Draw));
+		Assert.That(session.ScoreSummary.Player1RoundWins, Is.EqualTo(1));
+		Assert.That(session.ScoreSummary.Player2RoundWins, Is.EqualTo(1));
 	}
 
 	[Test]

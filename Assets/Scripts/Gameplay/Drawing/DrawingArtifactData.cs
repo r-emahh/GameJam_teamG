@@ -211,40 +211,31 @@ public sealed class DrawingArtifactSetData
 // カーソル移動と描画点の記録を Unity から分離して扱う。
 public sealed class DrawingRecorder
 {
-	private DrawingRectData bounds;
 	private readonly DrawingLimitsData limits;
 
 	public DrawingRecorder(
 		DrawingArtifactData artifact,
-		DrawingRectData bounds,
 		DrawingLimitsData limits,
 		DrawingPointData initialCursorPosition)
 	{
 		Artifact = artifact ?? throw new ArgumentNullException(nameof(artifact));
-		this.bounds = bounds;
 		this.limits = limits;
-		CursorPosition = bounds.Clamp(initialCursorPosition);
+		CursorPosition = initialCursorPosition;
 	}
 
 	public DrawingArtifactData Artifact { get; }
 	public DrawingPointData CursorPosition { get; private set; }
 	public bool IsDrawing { get; private set; }
 
-	public void SetBounds(DrawingRectData newBounds)
-	{
-		bounds = newBounds;
-		CursorPosition = bounds.Clamp(CursorPosition);
-	}
-
 	public bool MoveCursor(float deltaX, float deltaY)
 	{
-		CursorPosition = bounds.Clamp(CursorPosition.Move(deltaX, deltaY));
+		CursorPosition = CursorPosition.Move(deltaX, deltaY);
 		return IsDrawing && Artifact.TryAppendPoint(CursorPosition, limits);
 	}
 
 	public bool SetCursorPosition(DrawingPointData position)
 	{
-		CursorPosition = bounds.Clamp(position);
+		CursorPosition = position;
 		return IsDrawing && Artifact.TryAppendPoint(CursorPosition, limits);
 	}
 

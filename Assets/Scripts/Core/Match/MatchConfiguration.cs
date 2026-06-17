@@ -21,6 +21,10 @@ public sealed class MatchConfiguration
 	[SerializeField, Min(0f)]
 	private float resultPhaseDuration = 6f;
 
+	// フェーズ開始チュートリアル表示中にタイマーを止めるかを定義する。
+	[SerializeField]
+	private bool pausePhaseTimerDuringTutorial = true;
+
 	// Goal Runner 側が使える発射回数を定義する。
 	[SerializeField, Min(0)]
 	private int goalRunnerLaunchCount = 3;
@@ -58,6 +62,8 @@ public sealed class MatchConfiguration
 	public int MinBlockerStampCount => minBlockerStampCount;
 	// Blocker に配る図形数の上限を返す。
 	public int MaxBlockerStampCount => maxBlockerStampCount;
+	// チュートリアル表示中にフェーズタイマーを止めるかを返す。
+	public bool PausePhaseTimerDuringTutorial => pausePhaseTimerDuringTutorial;
 
 	// 指定フェーズに対応する継続時間を返す。
 	public float GetDuration(MatchPhase phase)

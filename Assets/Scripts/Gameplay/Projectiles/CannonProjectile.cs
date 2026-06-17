@@ -40,6 +40,8 @@ public sealed class CannonProjectile : MonoBehaviour
 
 	// 発射元の大砲を保持する。
 	private PlayerCannon owner;
+	// Place フェーズ終了を監視している GameManager を保持する。
+	private GameManager subscribedManager;
 	// 物理挙動を制御する。
 	private Rigidbody2D body;
 	// スタン用弾かどうかを記録する。
@@ -48,10 +50,14 @@ public sealed class CannonProjectile : MonoBehaviour
 	private bool isStopped;
 	// 衝突や寿命切れによる解決済み状態を記録する。
 	private bool isResolved;
+	// 地面に当たった時の音を1回だけ鳴らすための保留状態を記録する。
+	private bool pendingGroundImpactSound;
 	// 生成後の残り寿命を保持する。
 	private float remainingLifetime;
 	// 通常弾へ発射者の確定描画を適用済みかを記録する。
 	private bool hasDrawingArtifact;
+	// 描画砲弾のローカルX方向の後端位置を保持する。
+	private float drawingLocalBackEdge;
 
 	// 実行時生成の弾オブジェクトを作る。
 	public static CannonProjectile CreateRuntime(Vector3 position, Quaternion rotation, bool stunProjectile)
@@ -98,9 +104,11 @@ public sealed class CannonProjectile : MonoBehaviour
 
 		RemovePreviousDrawingGeometry();
 		DisableFixedProjectileVisual();
-		gameObject.layer = GetGroundLayer();
+		SetLayerRecursively(gameObject, GetFlyingProjectileLayer());
+		drawingLocalBackEdge = 0f;
 
 		int colliderIndex = 0;
+		bool foundLocalBackEdge = false;
 		for (int strokeIndex = 0; strokeIndex < artifact.Strokes.Count; strokeIndex++)
 		{
 			DrawingStrokeData stroke = artifact.Strokes[strokeIndex];
@@ -110,6 +118,13 @@ public sealed class CannonProjectile : MonoBehaviour
 			}
 
 			CreateStrokeVisual(stroke, strokeIndex, center, color, lineMaterial, lineWidth);
+			for (int pointIndex = 0; pointIndex < stroke.PointCount; pointIndex++)
+			{
+				float localX = stroke.Points[pointIndex].X - center.x - lineWidth * 0.5f;
+				drawingLocalBackEdge = foundLocalBackEdge ? Mathf.Min(drawingLocalBackEdge, localX) : localX;
+				foundLocalBackEdge = true;
+			}
+
 			List<DrawingPointData> colliderPoints = DrawingPathSimplifier.Simplify(
 				stroke.Points,
 				duplicatePointDistance,
@@ -133,9 +148,26 @@ public sealed class CannonProjectile : MonoBehaviour
 		return hasDrawingArtifact;
 	}
 
+	// 発射時に、砲弾の後端が発射口へ重ならないよう必要な押し出し距離を返す。
+	public float GetLaunchClearanceDistance(float extraClearance)
+	{
+		float clearance = Mathf.Max(0f, extraClearance);
+		if (hasDrawingArtifact)
+		{
+			return Mathf.Max(0f, -drawingLocalBackEdge * drawingProjectileScale) + clearance;
+		}
+
+		return stunProjectileRadius * stunProjectileScale + clearance;
+	}
+
 	// 発射元と弾種を設定し、初速を与える。
 	public void Initialize(PlayerCannon projectileOwner, bool stunProjectile, float launchPower = -1f)
 	{
+		if (isStopped || isResolved)
+		{
+			return;
+		}
+
 		owner = projectileOwner;
 		isStunProjectile = stunProjectile;
 		remainingLifetime = lifetime;
@@ -151,6 +183,10 @@ public sealed class CannonProjectile : MonoBehaviour
 		}
 
 		InitializeDrawingProjectile(launchPower);
+		if (!isResolved)
+		{
+			MonitorPlacePhase();
+		}
 	}
 
 	// 飛翔中の弾を寿命切れで破棄し、妨害弾は画面外でも破棄する。
@@ -174,6 +210,11 @@ public sealed class CannonProjectile : MonoBehaviour
 		if (isStopped || isResolved)
 		{
 			return;
+		}
+
+		if (IsGroundCollision(collision.collider))
+		{
+			pendingGroundImpactSound = true;
 		}
 
 		if (isStunProjectile)
@@ -227,6 +268,7 @@ public sealed class CannonProjectile : MonoBehaviour
 	private void HandleStunProjectileCollision(Collider2D hitCollider)
 	{
 		isResolved = true;
+		ConsumePendingGroundImpactSound();
 		PlayerIdentity identity = hitCollider.GetComponentInParent<PlayerIdentity>();
 		PlayerStun target = hitCollider.GetComponentInParent<PlayerStun>();
 		if (identity != null && identity.ControlledSide == MatchSide.GoalRunner && target != null)
@@ -263,6 +305,7 @@ public sealed class CannonProjectile : MonoBehaviour
 		}
 
 		isResolved = true;
+		StopMonitoringPlacePhase();
 		DisableCollisionAndDestroy();
 	}
 
@@ -278,13 +321,27 @@ public sealed class CannonProjectile : MonoBehaviour
 		Destroy(gameObject);
 	}
 
-	// 弾を静止状態にして設置物として扱う。
+	// 発射者本人からの入力である場合だけ、飛翔中の描画弾を停止する。
+	public bool TryStopProjectile(PlayerCannon requester)
+	{
+		if (requester == null || requester != owner || isStunProjectile || isStopped || isResolved)
+		{
+			return false;
+		}
+
+		StopProjectile();
+		return true;
+	}
+
+	// 弾を現在位置と角度で静止させ、設置物として扱う。
 	public void StopProjectile()
 	{
 		if (isStopped || isResolved)
 		{
 			return;
 		}
+
+		ConsumePendingGroundImpactSound();
 
 		if (isStunProjectile)
 		{
@@ -293,18 +350,65 @@ public sealed class CannonProjectile : MonoBehaviour
 		}
 
 		isStopped = true;
+		StopMonitoringPlacePhase();
+		Vector2 stoppedPosition = body.position;
+		float stoppedRotation = body.rotation;
 		body.linearVelocity = Vector2.zero;
 		body.angularVelocity = 0f;
 		body.bodyType = RigidbodyType2D.Static;
+		body.position = stoppedPosition;
+		body.rotation = stoppedRotation;
+		SetLayerRecursively(gameObject, GetGroundLayer());
 		gameObject.name = "PlacedDrawing";
 
-		owner?.ClearProjectileReference(this);
+		owner?.HandleProjectileStopped(this);
 	}
 
 	// 破棄時に所有者参照を外す。
 	private void OnDestroy()
 	{
+		StopMonitoringPlacePhase();
 		owner?.ClearProjectileReference(this);
+	}
+
+	// Place 終了時に飛翔中の描画弾をその場で足場化する。
+	private void MonitorPlacePhase()
+	{
+		GameManager manager = GameManager.Instance;
+		if (manager == null)
+		{
+			return;
+		}
+
+		if (manager.CurrentPhase != MatchPhase.Place)
+		{
+			StopProjectile();
+			return;
+		}
+
+		subscribedManager = manager;
+		subscribedManager.OnMatchPhaseChanged += HandleMatchPhaseChanged;
+	}
+
+	// Place 以外へ移った瞬間に、未停止の描画弾を解決する。
+	private void HandleMatchPhaseChanged(MatchPhase phase)
+	{
+		if (phase != MatchPhase.Place)
+		{
+			StopProjectile();
+		}
+	}
+
+	// フェーズ監視を解除する。
+	private void StopMonitoringPlacePhase()
+	{
+		if (subscribedManager == null)
+		{
+			return;
+		}
+
+		subscribedManager.OnMatchPhaseChanged -= HandleMatchPhaseChanged;
+		subscribedManager = null;
 	}
 
 	private static bool TryGetDrawingCenter(DrawingArtifactData artifact, out Vector2 center)
@@ -375,7 +479,7 @@ public sealed class CannonProjectile : MonoBehaviour
 		float lineWidth)
 	{
 		GameObject strokeObject = new GameObject($"DrawingStroke_{strokeIndex}");
-		strokeObject.layer = GetGroundLayer();
+		strokeObject.layer = GetFlyingProjectileLayer();
 		strokeObject.transform.SetParent(transform, false);
 
 		LineRenderer line = strokeObject.AddComponent<LineRenderer>();
@@ -415,7 +519,7 @@ public sealed class CannonProjectile : MonoBehaviour
 		}
 
 		GameObject segment = new GameObject($"DrawingCollider_{colliderIndex}");
-		segment.layer = GetGroundLayer();
+		segment.layer = GetFlyingProjectileLayer();
 		segment.transform.SetParent(transform, false);
 		segment.transform.localPosition = (localStart + localEnd) * 0.5f;
 		segment.transform.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(delta.y, delta.x) * Mathf.Rad2Deg);
@@ -430,6 +534,38 @@ public sealed class CannonProjectile : MonoBehaviour
 	{
 		int layer = LayerMask.NameToLayer("Ground");
 		return layer >= 0 ? layer : 0;
+	}
+
+	private static int GetFlyingProjectileLayer()
+	{
+		return 0;
+	}
+
+	// 地面レイヤーへの衝突かどうかを判定する。
+	private static bool IsGroundCollision(Collider2D collider)
+	{
+		return collider != null && collider.gameObject.layer == LayerMask.NameToLayer("Ground");
+	}
+
+	// 保留していた地面衝突音を1回だけ再生する。
+	private void ConsumePendingGroundImpactSound()
+	{
+		if (!pendingGroundImpactSound)
+		{
+			return;
+		}
+
+		pendingGroundImpactSound = false;
+		AudioManager.PlayGroundImpact();
+	}
+
+	private static void SetLayerRecursively(GameObject target, int layer)
+	{
+		target.layer = layer;
+		foreach (Transform child in target.transform)
+		{
+			SetLayerRecursively(child.gameObject, layer);
+		}
 	}
 
 	private static void DestroyRuntimeObject(Object target)
