@@ -758,7 +758,7 @@ public sealed class PlayerController : MonoBehaviour
 				ProcessMove(context.canceled ? Vector2.zero : context.ReadValue<Vector2>());
 				break;
 			case AimActionName:
-				ProcessAim(context.canceled ? Vector2.zero : context.ReadValue<Vector2>());
+				ProcessAimAction(context);
 				break;
 			case JumpActionName:
 				ProcessJump(context.ReadValueAsButton());
@@ -782,6 +782,24 @@ public sealed class PlayerController : MonoBehaviour
 				ProcessCrouch(context.ReadValueAsButton());
 				break;
 		}
+	}
+
+	private void ProcessAimAction(InputAction.CallbackContext context)
+	{
+		Vector2 value = context.canceled ? Vector2.zero : context.ReadValue<Vector2>();
+		if (IsAimAxisControl(context.control))
+		{
+			ProcessAimAxis(value.y);
+			return;
+		}
+
+		ProcessAim(value);
+	}
+
+	private static bool IsAimAxisControl(InputControl control)
+	{
+		string path = control?.path ?? string.Empty;
+		return path.Contains("/dpad/") || path.EndsWith("/r") || path.EndsWith("/f");
 	}
 
 	private void PollAssignedInputDevices()

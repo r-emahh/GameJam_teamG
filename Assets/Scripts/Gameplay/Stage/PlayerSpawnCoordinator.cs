@@ -81,6 +81,7 @@ public sealed class PlayerSpawnCoordinator : MonoBehaviour
 
 		InputManager.Instance.ResetDashAvailabilityForAllPlayers();
 		SnapCameraToPlacedPlayers();
+		Physics2D.SyncTransforms();
 	}
 
 	// 1人分の配置と入力設定をまとめる。

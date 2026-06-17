@@ -1,7 +1,7 @@
 using UnityEngine;
 
 [DisallowMultipleComponent]
-// タイルマップの範囲内で、登録済みプレイヤーの中点へカメラを追従させる。
+// タイルマップの範囲内で、進行役のプレイヤーへカメラを追従させる。
 public sealed class StageCameraScrollController : MonoBehaviour
 {
 	[SerializeField, Min(0f)]
@@ -97,8 +97,7 @@ public sealed class StageCameraScrollController : MonoBehaviour
 				: transform.position;
 		}
 
-		Vector3 center = Vector3.zero;
-		int count = 0;
+		PlayerController focusPlayer = null;
 		foreach (PlayerController player in InputManager.Instance.GetRegisteredPlayers())
 		{
 			if (player == null)
@@ -106,21 +105,28 @@ public sealed class StageCameraScrollController : MonoBehaviour
 				continue;
 			}
 
-			center += player.transform.position;
-			count++;
+			if (focusPlayer == null)
+			{
+				focusPlayer = player;
+			}
+
+			if (player.ControlledSide == MatchSide.GoalRunner)
+			{
+				focusPlayer = player;
+				break;
+			}
 		}
 
-		if (count == 0)
+		if (focusPlayer == null)
 		{
 			return hasWorldBounds
 				? new Vector3(worldBounds.center.x, worldBounds.center.y, transform.position.z)
 				: transform.position;
 		}
 
-		center /= count;
-		center += (Vector3)focusOffset;
-		center.z = transform.position.z;
-		return center;
+		Vector3 targetPosition = focusPlayer.transform.position + (Vector3)focusOffset;
+		targetPosition.z = transform.position.z;
+		return targetPosition;
 	}
 
 	private Vector3 ClampToWorldBounds(Vector3 desiredPosition)

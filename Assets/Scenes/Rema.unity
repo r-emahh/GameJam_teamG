@@ -555,7 +555,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   moveSpeedX: 8
   acceleration: 10
-  jumpPower: 6
+  jumpPower: 20
   wallJumpPower: 10
   wallJumpInputLockDuration: 0.2
 --- !u!114 &654243521
