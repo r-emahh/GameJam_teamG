@@ -4,10 +4,22 @@ using UnityEngine;
 // 1試合分の状態遷移と通知を担う、Unity 非依存の試合ロジック本体。
 public sealed class MatchSession
 {
+	private const int MaxRounds = 2;
+	private const float GoalTimeTieThresholdSeconds = 0.001f;
+
 	// 試合設定からフェーズ時間や弾数を取得する。
 	private readonly MatchConfiguration configuration;
 	// ラウンドごとの図形数を抽選する関数を保持する。
 	private readonly Func<int, int, int> randomRange;
+	// 各プレイヤーのラウンド勝利数を保持する。
+	private readonly int[] playerRoundWins = new int[2];
+	// 各プレイヤーが Goal Runner を担当した結果を保持する。
+	private readonly bool[] playerAttemptRecorded = new bool[2];
+	private readonly bool[] playerGoalSucceeded = new bool[2];
+	private readonly float[] playerGoalTimes = new float[2];
+	private bool finalResultExpired;
+	private bool phaseTimerPaused;
+	private float raceElapsedTime;
 
 	// 現在のフェーズを保持する。
 	public MatchPhase Phase { get; private set; } = MatchPhase.Idle;
@@ -29,8 +41,16 @@ public sealed class MatchSession
 	public int GoalRunnerShapes { get; private set; }
 	// Blocker 側の残り図形数を保持する。
 	public int BlockerShapes { get; private set; }
-	// Idle 以外なら試合進行中とみなす。
-	public bool IsRunning => Phase != MatchPhase.Idle;
+	// 現在の試合集計を保持する。
+	public MatchScoreSummary ScoreSummary { get; private set; } = MatchScoreSummary.Empty;
+	// 2ラウンド集計後の最終勝者を返す。
+	public MatchWinner FinalWinner => ScoreSummary.FinalWinner;
+	// Idle 以外かつ最終結果表示の消化前なら試合進行中とみなす。
+	public bool IsRunning => Phase != MatchPhase.Idle && !finalResultExpired;
+	// 2ラウンドの集計が確定済みかを返す。
+	public bool IsMatchComplete => ScoreSummary.IsMatchComplete;
+	// フェーズタイマー停止中かを返す。
+	public bool IsPhaseTimerPaused => phaseTimerPaused;
 
 	// フェーズ変更を外部へ通知する。
 	public event Action<MatchPhase> PhaseChanged;
@@ -48,6 +68,8 @@ public sealed class MatchSession
 	public event Action<int, int> LaunchBudgetChanged;
 	// 図形数の変更を外部へ通知する。
 	public event Action<int, int> ShapeBudgetChanged;
+	// 試合集計の変更を外部へ通知する。
+	public event Action<MatchScoreSummary> ScoreSummaryChanged;
 
 	// 設定を受け取り、試合進行に必要な値を保持する。
 	public MatchSession(MatchConfiguration configuration)
@@ -65,6 +87,8 @@ public sealed class MatchSession
 	// 新しい試合を開始し、初期ラウンドと初期フェーズへ入る。
 	public void Begin()
 	{
+		phaseTimerPaused = false;
+		ResetScoreSummary();
 		StartRound(1, false);
 	}
 
@@ -76,13 +100,24 @@ public sealed class MatchSession
 			return;
 		}
 
+		if (phaseTimerPaused)
+		{
+			return;
+		}
+
 		if (TimeRemaining <= 0f)
 		{
 			AdvancePhase();
 			return;
 		}
 
-		TimeRemaining = Mathf.Max(0f, TimeRemaining - deltaTime);
+		float consumedTime = Mathf.Min(deltaTime, TimeRemaining);
+		TimeRemaining = Mathf.Max(0f, TimeRemaining - consumedTime);
+		if (Phase == MatchPhase.Race)
+		{
+			raceElapsedTime = Mathf.Min(PhaseDuration, raceElapsedTime + consumedTime);
+		}
+
 		TimerChanged?.Invoke(TimeRemaining, PhaseDuration);
 	}
 
@@ -132,6 +167,7 @@ public sealed class MatchSession
 			return false;
 		}
 
+		RecordRoundOutcome(goalReached: true);
 		Result = MatchResult.GoalRunnerWin;
 		ResultChanged?.Invoke(Result);
 		SetPhase(MatchPhase.Result);
@@ -141,6 +177,12 @@ public sealed class MatchSession
 	// 制限時間切れとして結果を確定する。
 	public void MarkTimeUp()
 	{
+		if (Result != MatchResult.None)
+		{
+			return;
+		}
+
+		RecordRoundOutcome(goalReached: false);
 		Result = MatchResult.TimeUp;
 		ResultChanged?.Invoke(Result);
 		SetPhase(MatchPhase.Result);
@@ -159,6 +201,10 @@ public sealed class MatchSession
 		BlockerLaunches = 0;
 		GoalRunnerShapes = 0;
 		BlockerShapes = 0;
+		raceElapsedTime = 0f;
+		finalResultExpired = false;
+		phaseTimerPaused = false;
+		ResetScoreSummary();
 		PhaseChanged?.Invoke(Phase);
 		SideChanged?.Invoke(Side);
 		RoundChanged?.Invoke(Round);
@@ -166,6 +212,7 @@ public sealed class MatchSession
 		LaunchBudgetChanged?.Invoke(0, 0);
 		ShapeBudgetChanged?.Invoke(0, 0);
 		TimerChanged?.Invoke(0f, 0f);
+		ScoreSummaryChanged?.Invoke(ScoreSummary);
 	}
 
 	// 指定陣営の図形を1減らし、必要なら使えなくする。
@@ -193,6 +240,12 @@ public sealed class MatchSession
 		return true;
 	}
 
+	// 現在フェーズのタイマー進行を一時停止または再開する。
+	public void SetPhaseTimerPaused(bool paused)
+	{
+		phaseTimerPaused = paused;
+	}
+
 	// 現フェーズの終了後に進むべき次のフェーズを決める。
 	private void AdvancePhase()
 	{
@@ -208,6 +261,15 @@ public sealed class MatchSession
 				MarkTimeUp();
 				break;
 			case MatchPhase.Result:
+				if (Round >= MaxRounds)
+				{
+					finalResultExpired = true;
+					TimeRemaining = 0f;
+					PhaseDuration = 0f;
+					TimerChanged?.Invoke(0f, 0f);
+					break;
+				}
+
 				AdvanceRound();
 				break;
 		}
@@ -226,6 +288,7 @@ public sealed class MatchSession
 		if (Phase == MatchPhase.Race)
 		{
 			SetSide(MatchSide.GoalRunner);
+			raceElapsedTime = 0f;
 		}
 
 		PhaseDuration = configuration.GetDuration(Phase);
@@ -244,6 +307,8 @@ public sealed class MatchSession
 	// ラウンド状態をすべて確定してから、リセット処理と表示更新を順番に通知する。
 	private void StartRound(int round, bool notifyRoundAdvanced)
 	{
+		finalResultExpired = false;
+		phaseTimerPaused = false;
 		Round = round;
 		Result = MatchResult.None;
 		Side = MatchSide.GoalRunner;
@@ -266,6 +331,97 @@ public sealed class MatchSession
 		ShapeBudgetChanged?.Invoke(GoalRunnerShapes, BlockerShapes);
 		PhaseChanged?.Invoke(Phase);
 		TimerChanged?.Invoke(TimeRemaining, PhaseDuration);
+	}
+
+	private void RecordRoundOutcome(bool goalReached)
+	{
+		int goalRunnerPlayerNumber = GetGoalRunnerPlayerNumber(Round);
+		int blockerPlayerNumber = GetBlockerPlayerNumber(Round);
+		int goalRunnerIndex = goalRunnerPlayerNumber - 1;
+		int blockerIndex = blockerPlayerNumber - 1;
+
+		playerAttemptRecorded[goalRunnerIndex] = true;
+		playerGoalSucceeded[goalRunnerIndex] = goalReached;
+		playerGoalTimes[goalRunnerIndex] = goalReached ? raceElapsedTime : 0f;
+
+		if (goalReached)
+		{
+			playerRoundWins[goalRunnerIndex]++;
+		}
+		else
+		{
+			playerRoundWins[blockerIndex]++;
+		}
+
+		UpdateScoreSummary();
+	}
+
+	private void ResetScoreSummary()
+	{
+		Array.Clear(playerRoundWins, 0, playerRoundWins.Length);
+		Array.Clear(playerAttemptRecorded, 0, playerAttemptRecorded.Length);
+		Array.Clear(playerGoalSucceeded, 0, playerGoalSucceeded.Length);
+		Array.Clear(playerGoalTimes, 0, playerGoalTimes.Length);
+		ScoreSummary = MatchScoreSummary.Empty;
+	}
+
+	private void UpdateScoreSummary()
+	{
+		bool isMatchComplete = playerAttemptRecorded[0] && playerAttemptRecorded[1];
+		MatchWinner finalWinner = isMatchComplete ? DetermineFinalWinner() : MatchWinner.None;
+		ScoreSummary = new MatchScoreSummary(
+			playerRoundWins[0],
+			playerRoundWins[1],
+			playerAttemptRecorded[0],
+			playerAttemptRecorded[1],
+			playerGoalSucceeded[0],
+			playerGoalSucceeded[1],
+			playerGoalTimes[0],
+			playerGoalTimes[1],
+			finalWinner,
+			isMatchComplete);
+		ScoreSummaryChanged?.Invoke(ScoreSummary);
+	}
+
+	private MatchWinner DetermineFinalWinner()
+	{
+		if (playerRoundWins[0] > playerRoundWins[1])
+		{
+			return MatchWinner.Player1;
+		}
+
+		if (playerRoundWins[1] > playerRoundWins[0])
+		{
+			return MatchWinner.Player2;
+		}
+
+		if (playerGoalSucceeded[0] && playerGoalSucceeded[1])
+		{
+			float difference = playerGoalTimes[0] - playerGoalTimes[1];
+			if (Mathf.Abs(difference) <= GoalTimeTieThresholdSeconds)
+			{
+				return MatchWinner.Draw;
+			}
+
+			return difference < 0f ? MatchWinner.Player1 : MatchWinner.Player2;
+		}
+
+		if (!playerGoalSucceeded[0] && !playerGoalSucceeded[1])
+		{
+			return MatchWinner.Draw;
+		}
+
+		return MatchWinner.Draw;
+	}
+
+	private static int GetGoalRunnerPlayerNumber(int round)
+	{
+		return round % 2 == 1 ? 1 : 2;
+	}
+
+	private static int GetBlockerPlayerNumber(int round)
+	{
+		return GetGoalRunnerPlayerNumber(round) == 1 ? 2 : 1;
 	}
 
 	// 現在の操作陣営を変更し、必要なら通知する。

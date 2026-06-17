@@ -36,8 +36,7 @@ public sealed class PlayerDash : MonoBehaviour
 	// Rigidbody を初期化する。
 	private void Awake()
 	{
-		body = GetComponent<Rigidbody2D>();
-		defaultGravityScale = body.gravityScale;
+		EnsureBody();
 	}
 
 	// 入力方向から優先方向を更新する。
@@ -62,6 +61,7 @@ public sealed class PlayerDash : MonoBehaviour
 		isAvailable = false;
 		remainingDuration = duration;
 		remainingCooldown = cooldown;
+		EnsureBody();
 		body.gravityScale = 0f;
 		body.linearVelocity = new Vector2(0f, body.linearVelocity.y);
 		body.linearVelocity = preferredDirection * speed;
@@ -101,12 +101,30 @@ public sealed class PlayerDash : MonoBehaviour
 		FinishDash();
 	}
 
+	// スタンなどで現在のダッシュだけを中断する。
+	public void CancelActiveDash()
+	{
+		FinishDash();
+	}
+
 	// ダッシュ状態を終了し、重力を元に戻す。
 	private void FinishDash()
 	{
 		IsDashing = false;
 		remainingDuration = 0f;
+		EnsureBody();
 		body.linearVelocity = new Vector2(0f, body.linearVelocity.y);
 		body.gravityScale = defaultGravityScale;
+	}
+
+	private void EnsureBody()
+	{
+		if (body != null)
+		{
+			return;
+		}
+
+		body = GetComponent<Rigidbody2D>();
+		defaultGravityScale = body != null ? body.gravityScale : 0f;
 	}
 }

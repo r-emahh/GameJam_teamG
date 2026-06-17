@@ -7,6 +7,9 @@ public sealed class PlayerDrawing : MonoBehaviour
 	[SerializeField, Min(0f)]
 	private float cursorSpeed = 3.2f;
 
+	[SerializeField]
+	private Vector2 initialCursorPosition = new Vector2(-20f, -6f);
+
 	[SerializeField, Min(0)]
 	private int maxPointCount = 256;
 
@@ -117,7 +120,7 @@ public sealed class PlayerDrawing : MonoBehaviour
 		if (EnsureRecorder())
 		{
 			recorder.Clear();
-			recorder.SetCursorPosition(ToData(transform.position));
+			recorder.SetCursorPosition(GetInitialCursorPosition());
 			drawingSurface.RefreshVisual(playerSlot);
 			UpdateCursorPosition();
 		}
@@ -135,8 +138,6 @@ public sealed class PlayerDrawing : MonoBehaviour
 			return;
 		}
 
-		DrawingRectData bounds = drawingSurface.DataBounds;
-		recorder.SetBounds(bounds);
 		bool changed = recorder.MoveCursor(
 			moveInput.x * cursorSpeed * Time.fixedDeltaTime,
 			moveInput.y * cursorSpeed * Time.fixedDeltaTime);
@@ -173,9 +174,8 @@ public sealed class PlayerDrawing : MonoBehaviour
 		DrawingLimitsData limits = new DrawingLimitsData(maxPointCount, maxTotalLineLength, minPointSpacing);
 		recorder = new DrawingRecorder(
 			drawingSurface.GetArtifact(playerSlot),
-			drawingSurface.DataBounds,
 			limits,
-			ToData(transform.position));
+			GetInitialCursorPosition());
 		UpdateCursorColor();
 		return true;
 	}
@@ -205,9 +205,7 @@ public sealed class PlayerDrawing : MonoBehaviour
 
 		Color color = drawingSurface != null
 			? drawingSurface.GetPlayerColor(playerSlot)
-			: controlledSide == MatchSide.GoalRunner
-				? new Color(0.15f, 0.95f, 1f, 0.95f)
-				: new Color(1f, 0.35f, 0.25f, 0.95f);
+			: PlayerVisualPalette.GetPlayerColor(controlledSide == MatchSide.GoalRunner ? DrawingPlayerSlot.PlayerOne : DrawingPlayerSlot.PlayerTwo);
 		color.a = 0.9f;
 		cursorRenderer.color = color;
 	}
@@ -231,7 +229,10 @@ public sealed class PlayerDrawing : MonoBehaviour
 		}
 	}
 
-	private static DrawingPointData ToData(Vector3 position) => new DrawingPointData(position.x, position.y);
+	private DrawingPointData GetInitialCursorPosition()
+	{
+		return new DrawingPointData(initialCursorPosition.x, initialCursorPosition.y);
+	}
 
 	private static bool IsDrawPhase()
 	{

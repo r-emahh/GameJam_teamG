@@ -40,8 +40,20 @@ public sealed class GameManager : MonoBehaviour
 	public int GoalRunnerShapesRemaining => session.GoalRunnerShapes;
 	// Blocker の残り図形数を公開する。
 	public int BlockerShapesRemaining => session.BlockerShapes;
+	// 現在ラウンドで Goal Runner が落下した回数を公開する。
+	public int GoalRunnerFallCount { get; private set; }
+	// 現在の試合集計を公開する。
+	public MatchScoreSummary CurrentScoreSummary => session.ScoreSummary;
+	// 最終勝者を公開する。
+	public MatchWinner CurrentFinalWinner => session.FinalWinner;
 	// 試合が進行中かを公開する。
 	public bool IsMatchRunning => session.IsRunning;
+	// 最終結果オーバーレイを表示すべき状態かを公開する。
+	public bool IsFinalResultVisible => session.Phase == MatchPhase.Result && session.IsMatchComplete;
+	// フェーズ開始チュートリアル表示中にタイマーを止める設定を公開する。
+	public bool ShouldPausePhaseTimerDuringTutorial => configuration != null && configuration.PausePhaseTimerDuringTutorial;
+	// 現在フェーズのタイマー停止状態を公開する。
+	public bool IsPhaseTimerPaused => session.IsPhaseTimerPaused;
 
 	// ゲーム状態変更を購読側へ通知する。
 	public event Action<GameState> OnGameStateChanged;
@@ -61,6 +73,10 @@ public sealed class GameManager : MonoBehaviour
 	public event Action<int, int> OnLaunchBudgetChanged;
 	// 図形数の更新を購読側へ通知する。
 	public event Action<int, int> OnShapeBudgetChanged;
+	// Goal Runner の落下回数更新を購読側へ通知する。
+	public event Action<int> OnGoalRunnerFallCountChanged;
+	// HUD 向けの試合集計更新を通知する。
+	public event Action<MatchScoreSummary> OnMatchScoreSummaryChanged;
 
 	// シーンロード前に必要なら自動生成する。
 	[RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
@@ -121,6 +137,7 @@ public sealed class GameManager : MonoBehaviour
 		OnGameStateChanged?.Invoke(currentState);
 		if (currentState == GameState.Title)
 		{
+			ResetGoalRunnerFallCount();
 			session.Reset();
 		}
 	}
@@ -129,6 +146,7 @@ public sealed class GameManager : MonoBehaviour
 	public void BeginMatch()
 	{
 		ChangeState(GameState.Game);
+		ResetGoalRunnerFallCount();
 		session.Begin();
 	}
 
@@ -161,13 +179,45 @@ public sealed class GameManager : MonoBehaviour
 	public bool TryConsumeLaunch(MatchSide side) => session.TryConsumeLaunch(side);
 	// 指定陣営の図形数を消費する。
 	public bool TryConsumeShape(MatchSide side) => session.TryConsumeShape(side);
+	// フェーズタイマーの進行を一時停止または再開する。
+	public void SetPhaseTimerPaused(bool paused) => session.SetPhaseTimerPaused(paused);
 	// 試合を完全にリセットする。
-	public void ResetMatch() => session.Reset();
+	public void ResetMatch()
+	{
+		ResetGoalRunnerFallCount();
+		session.Reset();
+	}
+
+	// 試合シーンを再読み込みして最初から再戦する。
+	public void RetryMatch()
+	{
+		BeginMatch();
+		SceneManager.LoadScene(SceneCatalog.Match);
+	}
+
+	// タイトルへ戻り、試合状態を待機へ戻す。
+	public void ReturnToTitle()
+	{
+		ChangeState(GameState.Title);
+		SceneManager.LoadScene(SceneCatalog.Title);
+	}
+
+	// Race 中の Goal Runner 落下リスポーンを記録する。
+	public void RegisterGoalRunnerFall()
+	{
+		if (currentState != GameState.Game || session.Phase != MatchPhase.Race)
+		{
+			return;
+		}
+
+		GoalRunnerFallCount++;
+		OnGoalRunnerFallCountChanged?.Invoke(GoalRunnerFallCount);
+	}
 
 	// 該当シーンに入ったとき、必要なら試合を再開する。
 	private void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
 	{
-		if (SceneCatalog.IsMatch(scene.name) && currentState == GameState.Game && !session.IsRunning)
+		if (SceneCatalog.IsMatch(scene.name) && currentState == GameState.Game && !session.IsRunning && !session.IsMatchComplete)
 		{
 			session.Begin();
 		}
@@ -184,6 +234,7 @@ public sealed class GameManager : MonoBehaviour
 		session.ResultChanged += HandleResultChanged;
 		session.LaunchBudgetChanged += HandleLaunchBudgetChanged;
 		session.ShapeBudgetChanged += HandleShapeBudgetChanged;
+		session.ScoreSummaryChanged += HandleScoreSummaryChanged;
 	}
 
 	// Session への購読を外す。
@@ -197,6 +248,7 @@ public sealed class GameManager : MonoBehaviour
 		session.ResultChanged -= HandleResultChanged;
 		session.LaunchBudgetChanged -= HandleLaunchBudgetChanged;
 		session.ShapeBudgetChanged -= HandleShapeBudgetChanged;
+		session.ScoreSummaryChanged -= HandleScoreSummaryChanged;
 	}
 
 	// 各イベントをそのまま公開イベントへ流す。
@@ -206,7 +258,11 @@ public sealed class GameManager : MonoBehaviour
 	// 各イベントをそのまま公開イベントへ流す。
 	private void HandleRoundChanged(int value) => OnRoundChanged?.Invoke(value);
 	// 各イベントをそのまま公開イベントへ流す。
-	private void HandleRoundAdvanced(int value) => OnRoundAdvanced?.Invoke(value);
+	private void HandleRoundAdvanced(int value)
+	{
+		ResetGoalRunnerFallCount();
+		OnRoundAdvanced?.Invoke(value);
+	}
 	// 各イベントをそのまま公開イベントへ流す。
 	private void HandleTimerChanged(float remaining, float total) => OnPhaseTimerChanged?.Invoke(remaining, total);
 	// 各イベントをそのまま公開イベントへ流す。
@@ -215,4 +271,13 @@ public sealed class GameManager : MonoBehaviour
 	private void HandleLaunchBudgetChanged(int goalRunner, int blocker) => OnLaunchBudgetChanged?.Invoke(goalRunner, blocker);
 	// 各イベントをそのまま公開イベントへ流す。
 	private void HandleShapeBudgetChanged(int goalRunner, int blocker) => OnShapeBudgetChanged?.Invoke(goalRunner, blocker);
+	// 各イベントをそのまま公開イベントへ流す。
+	private void HandleScoreSummaryChanged(MatchScoreSummary value) => OnMatchScoreSummaryChanged?.Invoke(value);
+
+	// Goal Runner の落下回数を 0 に戻し、必要なら HUD に通知する。
+	private void ResetGoalRunnerFallCount()
+	{
+		GoalRunnerFallCount = 0;
+		OnGoalRunnerFallCountChanged?.Invoke(GoalRunnerFallCount);
+	}
 }

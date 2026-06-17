@@ -5,13 +5,13 @@ using UnityEngine;
 public sealed class DrawingArtifactDataTests
 {
 	[Test]
-	public void Recorder_ClampsCursorAndRecordsOnlyWhileDrawing()
+	public void Recorder_MovesCursorWithoutBoundsAndRecordsOnlyWhileDrawing()
 	{
 		DrawingArtifactData artifact = new DrawingArtifactData();
 		DrawingRecorder recorder = CreateRecorder(artifact, minPointSpacing: 0.1f);
 
 		recorder.MoveCursor(2f, 2f);
-		AssertPoint(recorder.CursorPosition, 1f, 1f);
+		AssertPoint(recorder.CursorPosition, 2f, 2f);
 		Assert.That(artifact.PointCount, Is.Zero);
 
 		Assert.That(recorder.SetDrawingActive(true), Is.True);
@@ -20,8 +20,8 @@ public sealed class DrawingArtifactDataTests
 
 		Assert.That(artifact.Strokes.Count, Is.EqualTo(1));
 		Assert.That(artifact.PointCount, Is.EqualTo(2));
-		AssertPoint(artifact.Strokes[0].Points[0], 1f, 1f);
-		AssertPoint(artifact.Strokes[0].Points[1], 0.5f, 0.5f);
+		AssertPoint(artifact.Strokes[0].Points[0], 2f, 2f);
+		AssertPoint(artifact.Strokes[0].Points[1], 1.5f, 1.5f);
 	}
 
 	[Test]
@@ -65,8 +65,7 @@ public sealed class DrawingArtifactDataTests
 			artifact,
 			maxPointCount: 3,
 			maxTotalLineLength: 1.5f,
-			minPointSpacing: 0.1f,
-			bounds: new DrawingRectData(-10f, -10f, 10f, 10f));
+			minPointSpacing: 0.1f);
 		recorder.SetDrawingActive(true);
 
 		Assert.That(recorder.MoveCursor(1f, 0f), Is.True);
@@ -307,16 +306,43 @@ public sealed class DrawingArtifactDataTests
 		}
 	}
 
+	[Test]
+	public void DrawingProjectile_ReportsLaunchClearanceFromDrawingBackEdge()
+	{
+		GameObject surfaceObject = new GameObject("DrawingSurfaceTest");
+		CannonProjectile projectile = null;
+		try
+		{
+			DrawingSurface surface = surfaceObject.AddComponent<DrawingSurface>();
+			DrawingArtifactData artifact = surface.GetArtifact(DrawingPlayerSlot.PlayerOne);
+			DrawingLimitsData limits = new DrawingLimitsData(10, 10f, 0.01f);
+			artifact.BeginStroke(new DrawingPointData(0f, 0f), limits);
+			artifact.TryAppendPoint(new DrawingPointData(2f, 0f), limits);
+			artifact.Confirm();
+
+			projectile = CannonProjectile.CreateRuntime(Vector3.zero, Quaternion.identity, false);
+			Assert.That(surface.TryConfigureProjectile(DrawingPlayerSlot.PlayerOne, projectile), Is.True);
+
+			Assert.That(projectile.GetLaunchClearanceDistance(0.6f), Is.GreaterThan(1.5f));
+		}
+		finally
+		{
+			if (projectile != null)
+			{
+				Object.DestroyImmediate(projectile.gameObject);
+			}
+			Object.DestroyImmediate(surfaceObject);
+		}
+	}
+
 	private static DrawingRecorder CreateRecorder(
 		DrawingArtifactData artifact,
 		int maxPointCount = 10,
 		float maxTotalLineLength = 10f,
-		float minPointSpacing = 0.1f,
-		DrawingRectData? bounds = null)
+		float minPointSpacing = 0.1f)
 	{
 		return new DrawingRecorder(
 			artifact,
-			bounds ?? new DrawingRectData(-1f, -1f, 1f, 1f),
 			new DrawingLimitsData(maxPointCount, maxTotalLineLength, minPointSpacing),
 			new DrawingPointData(0f, 0f));
 	}

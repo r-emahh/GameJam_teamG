@@ -5,6 +5,16 @@ using UnityEngine;
 // 水平移動、ジャンプ、入力ロックを扱う。
 public sealed class PlayerMotor2D : MonoBehaviour
 {
+	// 入力停止とは別に、外部要因で物理移動を止める理由を表す。
+	[System.Flags]
+	public enum MovementLockSource
+	{
+		None = 0,
+		DrawPhase = 1 << 0,
+		RaceSuppressed = 1 << 1,
+		PlacePhase = 1 << 2
+	}
+
 	// 水平移動速度を設定する。
 	[SerializeField]
 	private float moveSpeedX = 8f;
@@ -31,6 +41,8 @@ public sealed class PlayerMotor2D : MonoBehaviour
 	private RigidbodyConstraints2D defaultConstraints;
 	// 残り入力ロック時間を保持する。
 	private float inputLockTimer;
+	// 現在有効な移動ロック理由を保持する。
+	private MovementLockSource movementLockSources;
 
 	// 現在の移動入力を保持する。
 	public Vector2 MoveInput { get; private set; }
@@ -38,8 +50,16 @@ public sealed class PlayerMotor2D : MonoBehaviour
 	// Rigidbody をキャッシュする。
 	private void Awake()
 	{
-		body = GetComponent<Rigidbody2D>();
-		defaultConstraints = body.constraints;
+		EnsureBody();
+	}
+
+	// 壁ジャンプ由来の短期入力ロックは他状態と独立して進める。
+	private void FixedUpdate()
+	{
+		if (inputLockTimer > 0f)
+		{
+			inputLockTimer = Mathf.Max(0f, inputLockTimer - Time.fixedDeltaTime);
+		}
 	}
 
 	// 移動入力を更新する。
@@ -51,9 +71,13 @@ public sealed class PlayerMotor2D : MonoBehaviour
 	// 固定更新で水平移動を反映する。
 	public void TickFixed(PlayerContactSensor2D contacts, bool movementOverridden)
 	{
+		if (IsMovementLocked)
+		{
+			return;
+		}
+
 		if (inputLockTimer > 0f)
 		{
-			inputLockTimer = Mathf.Max(0f, inputLockTimer - Time.fixedDeltaTime);
 			return;
 		}
 
@@ -62,6 +86,7 @@ public sealed class PlayerMotor2D : MonoBehaviour
 			return;
 		}
 
+		EnsureBody();
 		float targetSpeed = MoveInput.x * moveSpeedX;
 		float nextSpeed = Mathf.MoveTowards(body.linearVelocity.x, targetSpeed, acceleration * Time.fixedDeltaTime);
 		body.linearVelocity = new Vector2(nextSpeed, body.linearVelocity.y);
@@ -70,11 +95,17 @@ public sealed class PlayerMotor2D : MonoBehaviour
 	// 接地または壁接触時のジャンプを試みる。
 	public bool TryJump(PlayerContactSensor2D contacts)
 	{
+		if (IsMovementLocked)
+		{
+			return false;
+		}
+
 		if (inputLockTimer > 0f)
 		{
 			return false;
 		}
 
+		EnsureBody();
 		if (contacts.IsGrounded)
 		{
 			body.linearVelocity = new Vector2(body.linearVelocity.x, jumpPower);
@@ -107,6 +138,7 @@ public sealed class PlayerMotor2D : MonoBehaviour
 	// 速度を完全に止める。
 	public void Stop()
 	{
+		EnsureBody();
 		body.linearVelocity = Vector2.zero;
 	}
 
@@ -114,20 +146,31 @@ public sealed class PlayerMotor2D : MonoBehaviour
 	public void ResetForNextRound()
 	{
 		inputLockTimer = 0f;
-		SetMovementLocked(false);
+		movementLockSources = MovementLockSource.None;
+		ApplyMovementLockState();
 		Stop();
+		EnsureBody();
 		body.angularVelocity = 0f;
 	}
 
 	// 移動を完全にロックまたは解除する。
-	public void SetMovementLocked(bool locked)
+	public void SetMovementLocked(MovementLockSource source, bool locked)
 	{
-		if (body == null)
-		{
-			return;
-		}
+		EnsureBody();
+		movementLockSources = locked
+			? movementLockSources | source
+			: movementLockSources & ~source;
+		ApplyMovementLockState();
+	}
 
-		if (locked)
+	// 完全ロック中かを返す。
+	public bool IsMovementLocked => movementLockSources != MovementLockSource.None;
+
+	// 現在のロック理由に合わせて Rigidbody 制約を更新する。
+	private void ApplyMovementLockState()
+	{
+		EnsureBody();
+		if (IsMovementLocked)
 		{
 			body.linearVelocity = Vector2.zero;
 			body.angularVelocity = 0f;
@@ -136,5 +179,16 @@ public sealed class PlayerMotor2D : MonoBehaviour
 		}
 
 		body.constraints = defaultConstraints;
+	}
+
+	private void EnsureBody()
+	{
+		if (body != null)
+		{
+			return;
+		}
+
+		body = GetComponent<Rigidbody2D>();
+		defaultConstraints = body != null ? body.constraints : RigidbodyConstraints2D.None;
 	}
 }

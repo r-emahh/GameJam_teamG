@@ -93,6 +93,26 @@ public sealed class CannonMount : MonoBehaviour
 		ApplyRotation();
 	}
 
+	// ワールド方向を指定し、ステージ中央基準の相対角度へ変換して適用する。
+	public void SetWorldDirection(Vector2 worldDirection)
+	{
+		if (worldDirection.sqrMagnitude <= Mathf.Epsilon)
+		{
+			return;
+		}
+
+		Vector3 center = ResolveStageCenter();
+		Vector2 centerDirection = center - transform.position;
+		if (centerDirection.sqrMagnitude <= Mathf.Epsilon)
+		{
+			centerDirection = Vector2.down;
+		}
+
+		float centerAngle = Mathf.Atan2(centerDirection.y, centerDirection.x) * Mathf.Rad2Deg;
+		float targetAngle = Mathf.Atan2(worldDirection.y, worldDirection.x) * Mathf.Rad2Deg;
+		SetAngle(Mathf.DeltaAngle(centerAngle, targetAngle));
+	}
+
 	// ラウンド開始時の角度へ戻す。
 	public void ResetAngle()
 	{

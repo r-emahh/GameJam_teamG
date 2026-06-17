@@ -6,8 +6,6 @@ using UnityEngine;
 public sealed class PlayerNameplate : MonoBehaviour
 {
 	private const string LabelObjectName = "PlayerNameplate";
-	private static readonly Color PlayerOneColor = new Color(0.25f, 0.65f, 1f, 1f);
-	private static readonly Color PlayerTwoColor = new Color(1f, 0.35f, 0.35f, 1f);
 
 	// 頭上へ持ち上げる量を微調整する。
 	[SerializeField]
@@ -29,6 +27,8 @@ public sealed class PlayerNameplate : MonoBehaviour
 	private bool isVisible = true;
 	// 前回反映したプレイヤー番号を保持する。
 	private int lastPlayerIndex = int.MinValue;
+	// 前回反映したスタン状態を保持する。
+	private bool lastStunnedState;
 	// 頭上位置計算に使う半分の高さを保持する。
 	private float cachedHalfHeight = 0.5f;
 	// 必要な参照とラベルを初期化する。
@@ -49,9 +49,10 @@ public sealed class PlayerNameplate : MonoBehaviour
 		EnsureLabel();
 
 		int playerIndex = GetPlayerIndex();
-		if (playerIndex != lastPlayerIndex)
+		bool isStunned = playerController != null && playerController.IsStunned;
+		if (playerIndex != lastPlayerIndex || isStunned != lastStunnedState)
 		{
-			ApplyPlayerIndex(playerIndex);
+			ApplyPlayerIndex(playerIndex, isStunned);
 		}
 
 		UpdatePosition();
@@ -62,7 +63,7 @@ public sealed class PlayerNameplate : MonoBehaviour
 	{
 		EnsureLabel();
 		RefreshHeight();
-		ApplyPlayerIndex(GetPlayerIndex());
+		ApplyPlayerIndex(GetPlayerIndex(), playerController != null && playerController.IsStunned);
 		UpdatePosition();
 	}
 
@@ -132,9 +133,10 @@ public sealed class PlayerNameplate : MonoBehaviour
 	}
 
 	// 登録順に応じてラベル文字と色を更新する。
-	private void ApplyPlayerIndex(int playerIndex)
+	private void ApplyPlayerIndex(int playerIndex, bool isStunned)
 	{
 		lastPlayerIndex = playerIndex;
+		lastStunnedState = isStunned;
 		if (textMesh == null)
 		{
 			return;
@@ -147,8 +149,10 @@ public sealed class PlayerNameplate : MonoBehaviour
 			return;
 		}
 
-		textMesh.text = $"P{playerIndex + 1}";
-		textMesh.color = playerIndex == 0 ? PlayerOneColor : playerIndex == 1 ? PlayerTwoColor : Color.white;
+		string baseLabel = $"P{playerIndex + 1}";
+		textMesh.text = isStunned ? $"{baseLabel} STUN" : baseLabel;
+		Color baseColor = PlayerVisualPalette.GetPlayerColor(playerIndex);
+		textMesh.color = isStunned ? Color.Lerp(baseColor, Color.red, 0.6f) : baseColor;
 		UpdateVisibility();
 	}
 

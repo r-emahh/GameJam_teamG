@@ -10,6 +10,10 @@ public sealed class PlayerSpawnCoordinator : MonoBehaviour
 	// Blocker のスポーン名。
 	public const string BlockerSpawnName = "BlockerSpawn";
 
+	// 両プレイヤーに試合開始時に割り当てる Animator Controller。
+	[SerializeField]
+	private RuntimeAnimatorController playerAnimatorController;
+
 	// 登録済みプレイヤーをスポーン地点へ配置する。
 	public void PlacePlayers()
 	{
@@ -68,12 +72,15 @@ public sealed class PlayerSpawnCoordinator : MonoBehaviour
 
 		InputManager.Instance.RefreshPlayerInputAssignments();
 		PlacePlayer(goalRunnerPlayer, goalRunnerSpawn);
+		AssignAnimatorController(goalRunnerPlayer);
 		if (blockerPlayer != null && blockerPlayer != goalRunnerPlayer)
 		{
 			PlacePlayer(blockerPlayer, blockerSpawn);
+			AssignAnimatorController(blockerPlayer);
 		}
 
 		InputManager.Instance.ResetDashAvailabilityForAllPlayers();
+		SnapCameraToPlacedPlayers();
 	}
 
 	// 1人分の配置と入力設定をまとめる。
@@ -88,5 +95,35 @@ public sealed class PlayerSpawnCoordinator : MonoBehaviour
 		{
 			player.transform.position = spawn.position;
 		}
+	}
+
+	private static void SnapCameraToPlacedPlayers()
+	{
+		Camera targetCamera = Camera.main;
+		if (targetCamera == null)
+		{
+			targetCamera = Object.FindFirstObjectByType<Camera>();
+		}
+
+		StageCameraScrollController controller = targetCamera != null
+			? targetCamera.GetComponent<StageCameraScrollController>()
+			: Object.FindFirstObjectByType<StageCameraScrollController>();
+		controller?.SnapToTarget();
+	}
+
+	private void AssignAnimatorController(PlayerController player)
+	{
+		if (player == null || playerAnimatorController == null)
+		{
+			return;
+		}
+
+		PlayerAnimationSync animationSync = player.GetComponent<PlayerAnimationSync>();
+		if (animationSync == null)
+		{
+			animationSync = player.gameObject.AddComponent<PlayerAnimationSync>();
+		}
+
+		animationSync.AssignRuntimeAnimatorController(playerAnimatorController);
 	}
 }
